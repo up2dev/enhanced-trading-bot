@@ -1,0 +1,46 @@
+{
+  "smtp": {
+    "server": "smtp.gmail.com",
+    "port": 587,
+    "username": "your-email@gmail.com",
+    "password": "your-gmail-app-password-here",
+    "use_tls": true,
+    "comment": "Pour Gmail: Générez un mot de passe d'application (16 caractères)"
+  },
+  "recipients": {
+    "daily": [
+      "admin@example.com"
+    ],
+    "weekly": [
+      "admin@example.com",
+      "manager@example.com"
+    ]
+  },
+  "sender": {
+    "name": "Trading Bot Raspberry Pi",
+    "email": "your-email@gmail.com"
+  },
+  "settings": {
+    "send_daily": true,
+    "send_weekly": true,
+    "attach_performance": true,
+    "max_attachment_size_mb": 5
+  },
+  "providers": {
+    "gmail": {
+      "server": "smtp.gmail.com",
+      "port": 587,
+      "note": "Nécessite mot de passe d'application"
+    },
+    "outlook": {
+      "server": "smtp-mail.outlook.com",
+      "port": 587,
+      "note": "Compatible avec Outlook/Hotmail"
+    },
+    "yahoo": {
+      "server": "smtp.mail.yahoo.com",
+      "port": 587,
+      "note": "Nécessite mot de passe d'application"
+    }
+  }
+}

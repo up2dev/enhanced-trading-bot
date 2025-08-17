@@ -82,3 +82,9 @@ coverage.xml
 *.cover
 *.py,cover
 .hypothesis/
+
+# 📧 CONFIGURATION EMAIL (SENSIBLE)
+config/email_config.json
+email_config.json
+*.email.json
+
