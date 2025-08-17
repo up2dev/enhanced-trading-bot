@@ -199,6 +199,21 @@ cat logs/daily_report.log
 
 ---
 
+### 📧 **Système Email** (`email_sender.py`)
+
+**Envoi automatique des rapports par email**
+
+#### **Configuration initiale :**
+
+```bash
+# Créer la configuration depuis le template
+python3 email_sender.py --test
+
+# Éditer la configuration avec vos paramètres
+nano config/email_config.json
+
+---
+
 ### 🔄 **Wrapper Cron** (`run_wrapper.sh`)
 
 **Script d'exécution automatique via cron**
