@@ -5,16 +5,24 @@
         "testnet": false
     },
     "trading": {
-        "base_currency": "USDC",
         "min_balance_reserve": 21,
         "max_trade_amount": 165,
         "max_trade_ratio": 0.25,
         "timeframe": "1h",
         "rsi_period": 14,
-        "rsi_oversold": 30,
         "first_rsi_rate": 35,
-        "second_rsi_rate": 30,
-        "default_profit_percentage": 3.0
+        "second_rsi_rate": 30
+    },
+    "risk_management": {
+        "max_positions_per_crypto": 30,
+        "cooldown_minutes": 30,
+        "max_daily_trades": 100,
+        "stop_loss_percentage": -8.0,
+        "use_oco_orders": true,
+        "stop_limit_buffer": 0.001
+    },
+    "advanced_strategy": {
+        "future_transfer_enabled": true
     },
     "cryptos": {
         "BTC": {
@@ -30,7 +38,7 @@
             "max_allocation": 0.19
         },
         "SOL": {
-            "active": false,
+            "active": true,
             "symbol": "SOLUSDC",
             "profit_percentage": 4.0,
             "max_allocation": 0.11
@@ -42,19 +50,19 @@
             "max_allocation": 0.09
         },
         "PEPE": {
-            "active": false,
+            "active": true,
             "symbol": "PEPEUSDC",
             "profit_percentage": 5.0,
             "max_allocation": 0.02
         },
         "DOT": {
-            "active": false,
+            "active": true,
             "symbol": "DOTUSDC",
             "profit_percentage": 3.0,
             "max_allocation": 0.07
         },
         "FLOKI": {
-            "active": false,
+            "active": true,
             "symbol": "FLOKIUSDC",
             "profit_percentage": 6.0,
             "max_allocation": 0.01
@@ -66,52 +74,22 @@
             "max_allocation": 0.12
         },
         "ADA": {
-            "active": false,
+            "active": true,
             "symbol": "ADAUSDC",
             "profit_percentage": 3.5,
             "max_allocation": 0.08
         },
         "DOGE": {
-            "active": false,
+            "active": true,
             "symbol": "DOGEUSDC",
             "profit_percentage": 4.0,
             "max_allocation": 0.04
         },
         "SHIB": {
-            "active": false,
+            "active": true,
             "symbol": "SHIBUSDC",
             "profit_percentage": 5.0,
             "max_allocation": 0.03
         }
-    },
-    "advanced_strategy": {
-        "multi_level_rsi": true,
-        "price_based_reentry": true,
-        "time_based_margins": true,
-        "future_transfer_enabled": true,
-        "future_transfer_ratio": 0.97
-    },
-    "risk_management": {
-        "max_positions_per_crypto": 10,
-        "cooldown_minutes": 30,
-        "max_daily_trades": 50,
-        "stop_loss_percentage": -8.0,
-        "use_oco_orders": true,
-        "stop_limit_buffer": 0.02,
-        "emergency_sell_on_shutdown": false,
-        "stop_loss_market_sell": true
-    },
-    "monitoring": {
-        "enable_webhook": false,
-        "webhook_url": "",
-        "send_daily_report": true,
-        "alert_on_stop_loss": true,
-        "log_level": "INFO"
-    },
-    "raspberry_pi": {
-        "enable_system_monitoring": true,
-        "max_cpu_temp": 75,
-        "cleanup_logs_days": 15,
-        "vacuum_db_interval_hours": 24
     }
 }
