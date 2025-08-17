@@ -1,0 +1,18 @@
+{
+  "smtp": {
+    "server": "smtp.gmail.com",
+    "port": 587,
+    "username": "franz.vetter.a@gmail.com",
+    "password": "pxvo irxs duay cjdv",
+    "use_tls": true
+  },
+  "recipients": {
+    "daily": ["contact@franz-vetter.fr"],
+    "weekly": ["contact@franz-vetter.fr", "franz.vetter.a@gmail.com"]
+  },
+  "settings": {
+    "send_daily": true,
+    "send_weekly": true,
+    "attach_performance": true
+  }
+}
