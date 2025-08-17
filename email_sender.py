@@ -149,7 +149,7 @@ class TradingBotMailer:
             with open(report_path, 'r', encoding='utf-8') as f:
                 report_content = f.read()
             
-            # Statistiques rapides
+            # Statistiques rapides CORRIGÉES
             stats_info = self._get_quick_stats()
             
             # Préparer l'email
@@ -322,28 +322,35 @@ class TradingBotMailer:
             return False
     
     def _get_quick_stats(self):
-        """Récupère des statistiques rapides pour l'email"""
+        """Récupère des statistiques rapides COHÉRENTES avec monitor.sh"""
         try:
-            # Compter les exécutions du jour
             today = datetime.now().strftime('%Y-%m-%d')
             executions = 0
+            
+            # MÉTHODE IDENTIQUE À monitor.sh
             if os.path.exists('logs/cron.log'):
-                with open('logs/cron.log', 'r') as f:
+                with open('logs/cron.log', 'r', encoding='utf-8') as f:
                     content = f.read()
-                    executions = content.count(f'{today}') // 2  # Approximation
+                    # Compter les débuts d'exécution (même logique que monitor.sh)
+                    executions = content.count(f'{today}') 
+                    lines_today = [line for line in content.split('\n') if today in line]
+                    # Compter seulement les "=== DÉBUT EXECUTION CRON ===" 
+                    executions = len([line for line in lines_today if "=== DÉBUT EXECUTION CRON ===" in line])
             
             # Stats depuis la DB si disponible
             try:
                 import sqlite3
                 conn = sqlite3.connect('db/trading.db')
+                
                 cursor = conn.execute("SELECT COUNT(*) FROM transactions WHERE date(created_at) = date('now')")
-                transactions = cursor.fetchone()[0]
+                transactions = cursor.fetchone()[0] or 0
                 
                 cursor = conn.execute("SELECT COUNT(*) FROM oco_orders WHERE status = 'ACTIVE'")
-                oco_active = cursor.fetchone()[0]
+                oco_active = cursor.fetchone()[0] or 0
                 
                 conn.close()
-            except:
+            except Exception as db_error:
+                self.logger.debug(f"Erreur DB: {db_error}")
                 transactions = 'N/A'
                 oco_active = 'N/A'
             
@@ -352,7 +359,9 @@ class TradingBotMailer:
                 'transactions': transactions,
                 'oco_active': oco_active
             }
-        except:
+            
+        except Exception as e:
+            self.logger.debug(f"Erreur stats rapides: {e}")
             return {'executions': 'N/A', 'transactions': 'N/A', 'oco_active': 'N/A'}
     
     def _get_weekly_stats(self):
@@ -378,7 +387,8 @@ class TradingBotMailer:
                 'volume': f"{result[1]:.2f}" if result[1] else "0.00",
                 'profit': f"{result[2]:+.2f}" if result[2] else "+0.00"
             }
-        except:
+        except Exception as e:
+            self.logger.debug(f"Erreur stats hebdomadaires: {e}")
             return {'total_transactions': 'N/A', 'volume': 'N/A', 'profit': 'N/A'}
     
     def _send_email(self, recipients, subject, html_content, attachments=None):
