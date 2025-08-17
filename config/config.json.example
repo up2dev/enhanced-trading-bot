@@ -5,6 +5,7 @@
         "testnet": false
     },
     "trading": {
+        "base_currency": "USDC",
         "min_balance_reserve": 21,
         "max_trade_amount": 165,
         "max_trade_ratio": 0.25,
