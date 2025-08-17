@@ -1,0 +1,363 @@
+"""
+Gestion de la base de données SQLite pour le trading bot
+Optimisée pour Raspberry Pi avec gestion des erreurs
+"""
+
+import sqlite3
+import logging
+import os
+import threading
+import time
+from typing import Optional, List, Dict, Any
+from datetime import datetime, timedelta
+from contextlib import contextmanager
+
+class DatabaseManager:
+    """Gestionnaire de base de données thread-safe pour Raspberry Pi"""
+    
+    def __init__(self, db_path: str = "db/trading.db"):
+        self.db_path = db_path
+        self.logger = logging.getLogger(__name__)
+        self._lock = threading.Lock()
+        
+        # Créer le répertoire si nécessaire
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        
+        # Initialiser la base
+        self._init_database()
+        
+        self.logger.info(f"📊 Base de données initialisée: {db_path}")
+    
+    def _init_database(self):
+        """Initialise les tables de la base de données"""
+        try:
+            with self.get_connection() as conn:
+                # Table des transactions
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS transactions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        symbol TEXT NOT NULL,
+                        order_id TEXT NOT NULL UNIQUE,
+                        transact_time TEXT NOT NULL,
+                        order_type TEXT NOT NULL,
+                        order_side TEXT NOT NULL,
+                        price REAL NOT NULL,
+                        qty REAL NOT NULL,
+                        commission REAL DEFAULT 0,
+                        commission_asset TEXT DEFAULT 'USDC',
+                        is_stop_loss BOOLEAN DEFAULT FALSE,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                
+                # Création des index séparément
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_transactions_symbol ON transactions(symbol)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_transactions_side ON transactions(order_side)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_transactions_time ON transactions(transact_time)")
+                
+                # Table des ordres OCO
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS oco_orders (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        symbol TEXT NOT NULL,
+                        oco_order_id TEXT NOT NULL UNIQUE,
+                        list_client_order_id TEXT,
+                        profit_order_id TEXT,
+                        stop_order_id TEXT,
+                        buy_transaction_id INTEGER,
+                        status TEXT DEFAULT 'ACTIVE',
+                        profit_target REAL,
+                        stop_loss_price REAL,
+                        quantity REAL,
+                        kept_quantity REAL DEFAULT 0,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (buy_transaction_id) REFERENCES transactions (id)
+                    )
+                """)
+                
+                # Index pour OCO
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_oco_symbol ON oco_orders(symbol)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_oco_status ON oco_orders(status)")
+                
+                # Table des statistiques journalières
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS daily_stats (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        date TEXT NOT NULL UNIQUE,
+                        total_trades INTEGER DEFAULT 0,
+                        successful_trades INTEGER DEFAULT 0,
+                        total_profit_usdc REAL DEFAULT 0,
+                        total_fees REAL DEFAULT 0,
+                        portfolio_value_start REAL DEFAULT 0,
+                        portfolio_value_end REAL DEFAULT 0,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                
+                # Index pour les stats
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_daily_stats_date ON daily_stats(date)")
+                
+                # Table des alertes/logs importants
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS alerts (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        type TEXT NOT NULL,
+                        symbol TEXT,
+                        message TEXT NOT NULL,
+                        severity TEXT DEFAULT 'INFO',
+                        data TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                
+                # Index pour les alertes
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_alerts_type ON alerts(type)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_alerts_severity ON alerts(severity)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_alerts_created ON alerts(created_at)")
+                
+                # Table de cache pour les cooldowns
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS cooldown_cache (
+                        symbol TEXT PRIMARY KEY,
+                        last_order_time INTEGER NOT NULL,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                
+                conn.commit()
+                self.logger.info("✅ Tables de base de données créées")
+                
+        except Exception as e:
+            self.logger.error(f"❌ Erreur initialisation base: {e}")
+            raise
+    
+    @contextmanager
+    def get_connection(self):
+        """Context manager pour les connexions thread-safe"""
+        conn = None
+        try:
+            with self._lock:
+                conn = sqlite3.connect(
+                    self.db_path, 
+                    timeout=30.0,
+                    check_same_thread=False
+                )
+                conn.row_factory = sqlite3.Row
+                
+                # Optimisations SQLite pour Raspberry Pi
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.execute("PRAGMA synchronous=NORMAL") 
+                conn.execute("PRAGMA cache_size=10000")
+                conn.execute("PRAGMA temp_store=MEMORY")
+                
+                yield conn
+                
+        except Exception as e:
+            if conn:
+                conn.rollback()
+            self.logger.error(f"❌ Erreur connexion DB: {e}")
+            raise
+        finally:
+            if conn:
+                conn.close()
+    
+    def insert_transaction(self, symbol: str, order_id: str, transact_time: str, 
+                         order_type: str, order_side: str, price: float, 
+                         qty: float, commission: float = 0, 
+                         commission_asset: str = 'USDC', is_stop_loss: bool = False) -> int:
+        """Insère une transaction"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.execute("""
+                    INSERT OR REPLACE INTO transactions 
+                    (symbol, order_id, transact_time, order_type, order_side, 
+                     price, qty, commission, commission_asset, is_stop_loss)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (symbol, order_id, transact_time, order_type, order_side, 
+                      price, qty, commission, commission_asset, is_stop_loss))
+                
+                transaction_id = cursor.lastrowid
+                conn.commit()
+                
+                self.logger.info(f"💾 Transaction enregistrée: {symbol} - {order_side} - {qty:.6f}")
+                return transaction_id
+                
+        except Exception as e:
+            self.logger.error(f"❌ Erreur insertion transaction: {e}")
+            raise
+    
+    def insert_oco_order(self, symbol: str, oco_order_id: str, profit_order_id: str,
+                        stop_order_id: str, buy_transaction_id: int, profit_target: float,
+                        stop_loss_price: float, quantity: float, kept_quantity: float = 0) -> int:
+        """Insère un ordre OCO"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.execute("""
+                    INSERT INTO oco_orders 
+                    (symbol, oco_order_id, profit_order_id, stop_order_id, 
+                     buy_transaction_id, profit_target, stop_loss_price, quantity, kept_quantity)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (symbol, oco_order_id, profit_order_id, stop_order_id,
+                      buy_transaction_id, profit_target, stop_loss_price, quantity, kept_quantity))
+                
+                oco_id = cursor.lastrowid
+                conn.commit()
+                
+                self.logger.info(f"📊 Ordre OCO enregistré: {symbol} - ID: {oco_order_id}")
+                return oco_id
+                
+        except Exception as e:
+            self.logger.error(f"❌ Erreur insertion OCO: {e}")
+            raise
+    
+    def get_transactions_by_symbol(self, symbol: str, days_back: int = 30) -> List[Dict]:
+        """Récupère les transactions d'un symbole"""
+        try:
+            cutoff_timestamp = int((datetime.now() - timedelta(days=days_back)).timestamp())
+            
+            with self.get_connection() as conn:
+                cursor = conn.execute("""
+                    SELECT * FROM transactions 
+                    WHERE symbol = ? 
+                    AND CAST(transact_time AS INTEGER) >= ?
+                    ORDER BY transact_time DESC
+                """, (symbol, cutoff_timestamp))
+                
+                return [dict(row) for row in cursor.fetchall()]
+                
+        except Exception as e:
+            self.logger.error(f"❌ Erreur récupération transactions {symbol}: {e}")
+            return []
+    
+    def get_daily_trades_count(self, date: Optional[str] = None) -> int:
+        """Compte les trades d'une date (aujourd'hui par défaut)"""
+        try:
+            if not date:
+                date = datetime.now().strftime('%Y-%m-%d')
+            
+            # Convertir en timestamp
+            date_start = int(datetime.strptime(date, '%Y-%m-%d').timestamp())
+            date_end = date_start + 86400
+            
+            with self.get_connection() as conn:
+                cursor = conn.execute("""
+                    SELECT COUNT(*) FROM transactions 
+                    WHERE order_side = 'BUY'
+                    AND CAST(transact_time AS INTEGER) >= ?
+                    AND CAST(transact_time AS INTEGER) < ?
+                """, (date_start, date_end))
+                
+                return cursor.fetchone()[0]
+                
+        except Exception as e:
+            self.logger.error(f"❌ Erreur comptage trades: {e}")
+            return 0
+    
+    def insert_alert(self, alert_type: str, message: str, symbol: str = None, 
+                    severity: str = 'INFO', data: str = None):
+        """Insère une alerte"""
+        try:
+            with self.get_connection() as conn:
+                conn.execute("""
+                    INSERT INTO alerts (type, symbol, message, severity, data)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (alert_type, symbol, message, severity, data))
+                
+                conn.commit()
+                self.logger.debug(f"🚨 Alerte enregistrée: {alert_type} - {message}")
+                
+        except Exception as e:
+            self.logger.error(f"❌ Erreur insertion alerte: {e}")
+    
+    def cleanup_old_data(self, days_to_keep: int = 90):
+        """Nettoie les anciennes données"""
+        try:
+            cutoff_date = datetime.now() - timedelta(days=days_to_keep)
+            cutoff_timestamp = int(cutoff_date.timestamp())
+            
+            with self.get_connection() as conn:
+                # Nettoyer les anciennes transactions
+                cursor = conn.execute("""
+                    DELETE FROM transactions 
+                    WHERE CAST(transact_time AS INTEGER) < ?
+                """, (cutoff_timestamp,))
+                
+                transactions_deleted = cursor.rowcount
+                
+                # Nettoyer les anciennes alertes
+                cursor = conn.execute("""
+                    DELETE FROM alerts 
+                    WHERE created_at < datetime('now', '-90 days')
+                """)
+                
+                alerts_deleted = cursor.rowcount
+                
+                conn.commit()
+                
+                if transactions_deleted > 0 or alerts_deleted > 0:
+                    self.logger.info(f"🧹 Nettoyage: {transactions_deleted} transactions, {alerts_deleted} alertes supprimées")
+                
+        except Exception as e:
+            self.logger.error(f"❌ Erreur nettoyage: {e}")
+    
+    def get_trading_statistics(self, days_back: int = 7) -> Dict:
+        """Récupère les statistiques de trading"""
+        try:
+            cutoff_timestamp = int((datetime.now() - timedelta(days=days_back)).timestamp())
+            
+            with self.get_connection() as conn:
+                # Statistiques générales
+                cursor = conn.execute("""
+                    SELECT 
+                        COUNT(*) as total_transactions,
+                        SUM(CASE WHEN order_side = 'BUY' THEN 1 ELSE 0 END) as buys,
+                        SUM(CASE WHEN order_side = 'SELL' THEN 1 ELSE 0 END) as sells,
+                        SUM(commission) as total_fees,
+                        COUNT(DISTINCT symbol) as unique_symbols
+                    FROM transactions 
+                    WHERE CAST(transact_time AS INTEGER) >= ?
+                """, (cutoff_timestamp,))
+                
+                general_stats = dict(cursor.fetchone())
+                
+                # Statistiques par crypto
+                cursor = conn.execute("""
+                    SELECT 
+                        symbol,
+                        COUNT(*) as trades,
+                        SUM(CASE WHEN order_side = 'BUY' THEN qty * price ELSE 0 END) as invested,
+                        SUM(CASE WHEN order_side = 'SELL' THEN qty * price ELSE 0 END) as sold,
+                        SUM(commission) as fees
+                    FROM transactions 
+                    WHERE CAST(transact_time AS INTEGER) >= ?
+                    GROUP BY symbol
+                    ORDER BY trades DESC
+                """, (cutoff_timestamp,))
+                
+                crypto_stats = [dict(row) for row in cursor.fetchall()]
+                
+                return {
+                    'period_days': days_back,
+                    'general': general_stats,
+                    'by_crypto': crypto_stats,
+                    'generated_at': datetime.now().isoformat()
+                }
+                
+        except Exception as e:
+            self.logger.error(f"❌ Erreur statistiques: {e}")
+            return {'error': str(e)}
+    
+    def vacuum_database(self):
+        """Optimise la base de données"""
+        try:
+            self.logger.info("🔧 Optimisation de la base de données...")
+            
+            with self.get_connection() as conn:
+                conn.execute("VACUUM")
+                conn.execute("ANALYZE")
+                conn.commit()
+                
+            self.logger.info("✅ Base de données optimisée")
+            
+        except Exception as e:
+            self.logger.error(f"❌ Erreur optimisation DB: {e}")

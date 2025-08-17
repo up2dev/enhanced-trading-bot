@@ -1,0 +1,8 @@
+python-binance==1.0.19
+pandas>=2.0.0
+pandas-ta>=0.3.14b0
+numpy>=1.24.0
+requests>=2.31.0
+cryptography>=41.0.0
+aiohttp>=3.8.0
+

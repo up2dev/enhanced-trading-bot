@@ -1,0 +1,84 @@
+# 🔒 FICHIERS SENSIBLES (CRITIQUE - JAMAIS COMMIT!)
+config/config.json
+*.key
+*.secret
+.env
+.env.*
+
+# 💾 BASE DE DONNÉES ET DONNÉES LOCALES
+db/
+*.db
+*.sqlite
+*.sqlite3
+backups/
+
+# 📊 LOGS ET TEMPORAIRES
+logs/
+*.log
+*.log.*
+debug.log
+performance_report_*.txt
+weekly_report.txt
+
+# 🐍 PYTHON
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# 🌐 ENVIRONNEMENT VIRTUEL
+venv/
+env/
+ENV/
+.venv/
+.ENV/
+
+# 📝 ÉDITEURS ET IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# 🔧 CONFIGURATION LOCALE
+local_config.json
+test_config.json
+*.local
+
+# 📊 RAPPORTS TEMPORAIRES
+report_*.txt
+backup_*.db
+trading_backup_*.db
+
+# 🗂️ SYSTÈME
+.cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/

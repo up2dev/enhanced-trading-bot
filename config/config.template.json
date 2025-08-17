@@ -1,0 +1,101 @@
+{
+  "binance": {
+    "api_key": "YOUR_BINANCE_API_KEY_HERE",
+    "api_secret": "YOUR_BINANCE_SECRET_KEY_HERE",
+    "testnet": false
+  },
+  "trading": {
+    "max_trade_amount": 165,
+    "max_trade_ratio": 0.25,
+    "min_balance_reserve": 21,
+    "rsi_period": 14,
+    "timeframe": "1h",
+    "first_rsi_rate": 35,
+    "second_rsi_rate": 30,
+    "rsi_oversold": 30
+  },
+  "risk_management": {
+    "max_positions_per_crypto": 15,
+    "cooldown_minutes": 20,
+    "max_daily_trades": 150,
+    "stop_loss_percentage": -8.0,
+    "use_oco_orders": true,
+    "stop_limit_buffer": 0.02
+  },
+  "advanced_strategy": {
+    "future_transfer_enabled": true,
+    "use_advanced_indicators": false,
+    "bollinger_periods": 20,
+    "macd_fast": 12,
+    "macd_slow": 26,
+    "macd_signal": 9
+  },
+  "cryptos": {
+    "BTC": {
+      "active": true,
+      "symbol": "BTCUSDC",
+      "profit_percentage": 3.0,
+      "max_allocation": 0.24
+    },
+    "ETH": {
+      "active": true,
+      "symbol": "ETHUSDC",
+      "profit_percentage": 2.5,
+      "max_allocation": 0.19
+    },
+    "SOL": {
+      "active": false,
+      "symbol": "SOLUSDC",
+      "profit_percentage": 3.0,
+      "max_allocation": 0.11
+    },
+    "XRP": {
+      "active": false,
+      "symbol": "XRPUSDC",
+      "profit_percentage": 3.0,
+      "max_allocation": 0.09
+    },
+    "PEPE": {
+      "active": false,
+      "symbol": "PEPEUSDC",
+      "profit_percentage": 4.0,
+      "max_allocation": 0.02
+    },
+    "DOT": {
+      "active": false,
+      "symbol": "DOTUSDC",
+      "profit_percentage": 3.0,
+      "max_allocation": 0.07
+    },
+    "FLOKI": {
+      "active": false,
+      "symbol": "FLOKIUSDC",
+      "profit_percentage": 5.0,
+      "max_allocation": 0.01
+    },
+    "BNB": {
+      "active": false,
+      "symbol": "BNBUSDC",
+      "profit_percentage": 2.0,
+      "max_allocation": 0.12
+    },
+    "ADA": {
+      "active": false,
+      "symbol": "ADAUSDC",
+      "profit_percentage": 3.0,
+      "max_allocation": 0.08
+    },
+    "DOGE": {
+      "active": false,
+      "symbol": "DOGEUSDC",
+      "profit_percentage": 4.0,
+      "max_allocation": 0.04
+    },
+    "SHIB": {
+      "active": false,
+      "symbol": "SHIBUSDC",
+      "profit_percentage": 4.0,
+      "max_allocation": 0.03
+    }
+  }
+}
