@@ -137,7 +137,7 @@ def main():
         
         if not config_path.exists():
             logger.error(f"❌ Fichier config introuvable: {config_path}")
-            logger.info("💡 Copiez config.json.example vers config.json et configurez vos clés API")
+            logger.info("💡 Copiez config.template.json vers config.json et configurez vos clés API")
             sys.exit(1)
         
         config = load_json_config(str(config_path))

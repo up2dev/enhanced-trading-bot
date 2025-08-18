@@ -8,7 +8,9 @@ Bot de trading automatisé pour Binance optimisé pour Raspberry Pi avec gestion
 enhanced_trading_bot/
 ├── 🤖 run_bot.py              # Script principal du bot
 ├── 🔧 config/                 # Configuration
-│   └── config.json           # Paramètres trading et API
+│   ├── config.json           # Paramètres trading et API
+│   ├── config.template.json  # Template de configuration
+│   └── email_config.json     # Configuration email (optionnel)
 ├── 🧠 src/                    # Code source
 │   ├── bot.py                # Bot principal
 │   ├── trading_engine.py     # Moteur de trading
@@ -23,8 +25,10 @@ enhanced_trading_bot/
 │   ├── cleanup_db.py         # Nettoyage base de données
 │   ├── db_query.py           # Explorateur base de données
 │   ├── performance_stats.py  # Analyseur de performance
+│   ├── email_sender.py       # Système d'envoi email
 │   ├── monitor.sh            # Monitoring et rapports
-│   └── run_wrapper.sh        # Wrapper d'exécution cron
+│   ├── run_wrapper.sh        # Wrapper d'exécution cron
+│   └── setup.sh              # Script d'installation
 └── 🐍 venv/                   # Environnement virtuel Python
 ```
 
@@ -32,36 +36,75 @@ enhanced_trading_bot/
 
 ## 🚀 Installation et Configuration
 
-### 1. **Prérequis**
+### **Installation automatique (recommandée)**
 
 ```bash
-# Système à jour
+# Cloner le repository
+git clone https://github.com/up2dev/enhanced-trading-bot.git
+cd enhanced-trading-bot
+
+# Installation interactive
+chmod +x setup.sh
+./setup.sh
+```
+
+### **Installation manuelle**
+
+```bash
+# Prérequis système
 sudo apt update && sudo apt upgrade -y
+sudo apt install python3-full python3-pip python3-venv git sqlite3 -y
 
-# Dépendances Python
-sudo apt install python3-full python3-pip python3-venv -y
-```
-
-### 2. **Configuration**
-
-```bash
-# Aller dans le répertoire
-cd /home/yotsi/enhanced_trading_bot
-
-# Activer l'environnement virtuel
+# Environnement Python
+python3 -m venv venv
 source venv/bin/activate
-
-# Vérifier les dépendances
 pip install -r requirements.txt
+
+# Configuration
+cp config/config.template.json config/config.json
+# Éditez config/config.json avec vos clés API
 ```
 
-### 3. **Configuration Binance**
+### **Configuration Binance**
 
 Éditez `config/config.json` avec vos clés API et configurez les permissions sur Binance :
 
 - ✅ **Enable Trading**
 - ✅ **Enable Reading** 
 - ❌ **Disable Withdrawals**
+
+---
+
+## 🚨 Versions Critiques et Corrections
+
+### **⚠️ Mises à jour critiques récentes**
+
+| Version | Type | Description | Action Requise |
+|---------|------|-------------|----------------|
+| **v1.2.4** | 🚨 **CRITIQUE** | Correction multi-fill orders | **OBLIGATOIRE** |
+| **v1.2.3** | 🔧 Important | Correction API Binance OCO | Recommandée |
+| **v1.2.2** | 📊 Mineur | Correction statistiques email | Optionnelle |
+
+#### **🔥 v1.2.4 - Correction Multi-fill Orders (CRITIQUE)**
+
+**Problème résolu :** Les ordres d'achat exécutés en plusieurs fills n'enregistraient que le premier fill (5-15% de la quantité réelle).
+
+**Impact :** 
+- ❌ **AVANT** : Achat 50 USDC → Enregistré 0.031 SOL → OCO sur 5%
+- ✅ **APRÈS** : Achat 50 USDC → Enregistré 0.619 SOL → OCO sur 100%
+
+**Vérification après mise à jour :**
+```bash
+# Vos logs doivent maintenant montrer :
+📊 Ordre exécuté en 8 fill(s):
+✅ RÉCAPITULATIF: 8 fills = 0.61900000 SOL (quantité complète)
+```
+
+#### **🔧 v1.2.3 - Correction API Binance**
+
+**Problème résolu :** Erreur API `-1104` sur les ordres OCO (trop de paramètres envoyés).
+
+**Vérification :** Plus d'erreurs `-1104` dans les logs.
 
 ---
 
@@ -211,6 +254,118 @@ python3 email_sender.py --test
 
 # Éditer la configuration avec vos paramètres
 nano config/email_config.json
+```
+
+#### **Paramètres Gmail :**
+
+1. **Activer l'authentification à 2 facteurs** sur votre compte Google
+2. **Générer un mot de passe d'application** :
+   - Google Account → Sécurité → Mots de passe des applications
+   - Choisir "Mail" + nom de votre appareil
+   - Copier le mot de passe généré (16 caractères)
+3. **Utiliser ce mot de passe** dans `config/email_config.json`
+
+#### **Configuration type :**
+
+```json
+{
+  "smtp": {
+    "server": "smtp.gmail.com",
+    "port": 587,
+    "username": "votre-email@gmail.com",
+    "password": "abcd efgh ijkl mnop",
+    "use_tls": true
+  },
+  "recipients": {
+    "daily": ["admin@exemple.com"],
+    "weekly": ["admin@exemple.com", "manager@exemple.com"]
+  },
+  "settings": {
+    "send_daily": true,
+    "send_weekly": true,
+    "attach_performance": true
+  }
+}
+```
+
+#### **Commandes disponibles :**
+
+```bash
+# Test de configuration (obligatoire avant utilisation)
+python3 email_sender.py --test
+
+# Envoi manuel rapport quotidien
+python3 email_sender.py --daily
+
+# Envoi manuel rapport hebdomadaire
+python3 email_sender.py --weekly
+```
+
+#### **Automatisation cron :**
+
+```bash
+# Éditer le cron
+crontab -e
+
+# Ajouter ces lignes :
+# Bot toutes les 10 minutes
+*/10 * * * * /home/yotsi/enhanced_trading_bot/run_wrapper.sh
+
+# Rapport quotidien à 18h (avec email)
+0 18 * * * cd /home/yotsi/enhanced_trading_bot && ./monitor.sh && python3 email_sender.py --daily
+
+# Rapport performance hebdomadaire le dimanche à 19h
+0 19 * * 0 cd /home/yotsi/enhanced_trading_bot && python3 email_sender.py --weekly
+```
+
+#### **Sécurité :**
+
+- ✅ **Configuration exclue** du repository Git
+- ✅ **Templates fournis** pour nouveaux utilisateurs  
+- ✅ **Support mots de passe d'application** Gmail
+- ✅ **Validation automatique** des paramètres
+
+#### **Fournisseurs supportés :**
+
+| Fournisseur | Serveur SMTP | Port | Notes |
+|------------|--------------|------|-------|
+| **Gmail** | `smtp.gmail.com` | 587 | Mot de passe d'app requis |
+| **Outlook** | `smtp-mail.outlook.com` | 587 | Compatible Hotmail |
+| **Yahoo** | `smtp.mail.yahoo.com` | 587 | Mot de passe d'app requis |
+
+#### **Contenu des emails :**
+
+**📧 Rapport quotidien :**
+- Statistiques d'exécution du bot
+- Nombre de transactions du jour
+- Ordres OCO actifs  
+- Performance système Raspberry Pi
+- Erreurs récentes
+
+**📈 Rapport hebdomadaire :**
+- Analyse de performance (7 jours)
+- ROI et profits/pertes
+- Volume de trading
+- Rapport de monitoring complet
+- Fichier de performance en pièce jointe
+
+#### **Dépannage :**
+
+```bash
+# Vérifier les logs email
+tail -20 logs/email.log
+
+# Test avec debug
+python3 email_sender.py --test
+
+# Vérifier la configuration
+cat config/email_config.json
+```
+
+**Erreurs communes :**
+- **"Authentication failed"** : Vérifiez le mot de passe d'application
+- **"Connection refused"** : Vérifiez server/port SMTP
+- **"Configuration invalide"** : Éditez `config/email_config.json`
 
 ---
 
@@ -268,6 +423,7 @@ sudo tail /var/log/syslog | grep CRON
     "testnet": false
   },
   "trading": {
+    "base_currency": "USDC",
     "max_trade_amount": 165,
     "max_trade_ratio": 0.25,
     "min_balance_reserve": 21,
@@ -281,7 +437,11 @@ sudo tail /var/log/syslog | grep CRON
     "cooldown_minutes": 20,
     "max_daily_trades": 150,
     "stop_loss_percentage": -8.0,
-    "use_oco_orders": true
+    "use_oco_orders": true,
+    "stop_limit_buffer": 0.001
+  },
+  "advanced_strategy": {
+    "future_transfer_enabled": true
   },
   "cryptos": {
     "BTC": {
@@ -308,6 +468,7 @@ sudo tail /var/log/syslog | grep CRON
 - `logs/trading_bot.log` : Activité principale du bot
 - `logs/cron.log` : Exécutions automatiques
 - `logs/errors.log` : Erreurs système
+- `logs/email.log` : Activité email
 - `logs/daily_report.log` : Rapport quotidien
 
 ### **Consultation des logs :**
@@ -336,10 +497,13 @@ grep "STATISTIQUES" logs/daily_report.log
 # Sauvegardes
 cp db/trading.db db/backup_$(date +%Y%m%d).db
 
+# Mise à jour du code
+git pull origin main
+
 # Nettoyage périodique
 python3 cleanup_db.py --days-keep 30
 
-# Rotation des logs (automatique mais peut être forcée)
+# Rotation des logs (automatique)
 find logs/ -name "*.log" -mtime +15 -delete
 ```
 
@@ -398,13 +562,24 @@ python3 db_query.py --stats
 python3 cleanup_db.py --clear-orphaned
 ```
 
+### **Problèmes multi-fill (v1.2.4+) :**
+
+```bash
+# Vérifier que les fills sont bien traités
+grep "Ordre exécuté en.*fill" logs/trading_bot.log
+
+# Doit montrer des lignes comme :
+# "📊 Ordre exécuté en 8 fill(s):"
+# "✅ RÉCAPITULATIF: 8 fills = 0.61900000 SOL"
+```
+
 ---
 
 ## 📞 Support et Développement
 
 ### **Structure du code :**
-- `src/bot.py` : Logique principale
-- `src/trading_engine.py` : Décisions de trading (RSI, OCO)
+- `src/bot.py` : Logique principale + gestion position totale
+- `src/trading_engine.py` : Décisions trading + gestion multi-fill
 - `src/binance_client.py` : Interface API Binance
 - `src/database.py` : Gestion SQLite
 - `src/portfolio_manager.py` : Gestion allocation
@@ -423,6 +598,9 @@ python3 run_bot.py --dry-run --log-level DEBUG > debug.log 2>&1
 
 # Analyser les indicateurs techniques
 grep "Indicateurs" logs/trading_bot.log
+
+# Vérifier les fills multiples (v1.2.4+)
+grep "fills.*RÉCAPITULATIF" logs/trading_bot.log
 ```
 
 ---
@@ -431,9 +609,12 @@ grep "Indicateurs" logs/trading_bot.log
 
 - ✅ **Trading RSI automatique** avec gestion des rachats
 - ✅ **Ordres OCO** (profit + stop-loss) avec surveillance
+- ✅ **Gestion multi-fill** complète (v1.2.4+)
+- ✅ **Position totale** pour OCO intelligents
 - ✅ **Gestion d'allocation portfolio** intelligente
 - ✅ **Protection cooldown** et limites journalières
 - ✅ **Monitoring système** complet Raspberry Pi
+- ✅ **Rapports email** automatiques
 - ✅ **Statistiques de performance** détaillées
 - ✅ **Gestion des erreurs** robuste avec retry
 - ✅ **Mode simulation** complet pour tests
@@ -458,6 +639,9 @@ python3 db_query.py --interactive
 # 4. Vérifier les ordres OCO actifs
 python3 db_query.py -i
 # puis : show oco_orders 10
+
+# 5. Vérifier les multi-fills récents (v1.2.4+)
+grep "RÉCAPITULATIF" logs/trading_bot.log | tail -5
 ```
 
 ### **Commandes de maintenance hebdomadaire :**
@@ -471,11 +655,24 @@ python3 cleanup_db.py --days-keep 30
 
 # Export rapport performance
 python3 performance_stats.py --export weekly_report.txt --full
+
+# Mise à jour du code
+git pull origin main
 ```
+
+---
+
+## 🔗 Liens Utiles
+
+- **Repository GitHub** : [enhanced-trading-bot](https://github.com/up2dev/enhanced-trading-bot)
+- **Issues/Support** : [GitHub Issues](https://github.com/up2dev/enhanced-trading-bot/issues)
+- **Releases** : [GitHub Releases](https://github.com/up2dev/enhanced-trading-bot/releases)
+- **Documentation Binance API** : [Binance API](https://binance-docs.github.io/apidocs/spot/en/)
 
 ---
 
 **🎯 Le bot est conçu pour fonctionner 24/7 sur Raspberry Pi avec une surveillance minimale !**
 
+**⚠️ Assurez-vous d'utiliser la version v1.2.4+ pour un fonctionnement optimal des ordres multi-fill !**
+
 Pour toute question spécifique, consultez les logs ou utilisez les outils de diagnostic intégrés.
-```
