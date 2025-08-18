@@ -484,8 +484,7 @@ class TradingEngine:
                         price=f"{target_price:.{price_precision}f}",
                         stopPrice=f"{stop_price:.{price_precision}f}",
                         stopLimitPrice=f"{stop_limit_price:.{price_precision}f}",
-                        stopLimitTimeInForce='GTC',
-                        timeInForce='GTC'
+                        stopLimitTimeInForce='GTC'
                     )
                     
                     self.logger.info(f"✅ ORDRE OCO PLACÉ {symbol}")
