@@ -198,13 +198,14 @@ class DatabaseManager:
             self.logger.error(f"❌ Erreur update OCO: {e}")
     
     def get_daily_buy_count(self, date: Optional[str] = None) -> int:
-        """Compte les achats du jour (UTILISÉE pour cooldown)"""
+        """Compte les achats du jour - VERSION CORRIGÉE pour timestamps Binance"""
         try:
             if not date:
                 date = datetime.now().strftime('%Y-%m-%d')
             
-            date_start = int(datetime.strptime(date, '%Y-%m-%d').timestamp())
-            date_end = date_start + 86400
+            # 🔧 CORRECTION: Timestamps Binance sont en millisecondes !
+            date_start = int(datetime.strptime(date, '%Y-%m-%d').timestamp() * 1000)  # x1000 !
+            date_end = date_start + (86400 * 1000)  # +24h en millisecondes
             
             with self.get_connection() as conn:
                 cursor = conn.execute("""
@@ -214,7 +215,12 @@ class DatabaseManager:
                     AND CAST(transact_time AS INTEGER) < ?
                 """, (date_start, date_end))
                 
-                return cursor.fetchone()[0]
+                count = cursor.fetchone()[0]
+                
+                # Debug pour vérification
+                self.logger.debug(f"🔍 Comptage achats {date}: {count} (range: {date_start} - {date_end})")
+                
+                return count
                 
         except Exception as e:
             self.logger.error(f"❌ Erreur comptage achats: {e}")
