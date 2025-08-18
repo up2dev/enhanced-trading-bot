@@ -248,14 +248,16 @@ class DatabaseManager:
             return None
     
     def get_quick_stats(self) -> Dict:
-        """Stats rapides pour les logs (UTILISÉE)"""
+        """Stats rapides pour les logs - VERSION CORRIGÉE timestamps"""
         try:
             today = datetime.now().strftime('%Y-%m-%d')
-            today_start = int(datetime.strptime(today, '%Y-%m-%d').timestamp())
-            today_end = today_start + 86400
+            
+            # 🔧 CORRECTION: Timestamps Binance en millisecondes !
+            today_start = int(datetime.strptime(today, '%Y-%m-%d').timestamp() * 1000)  # x1000
+            today_end = today_start + (86400 * 1000)  # +24h en millisecondes
             
             with self.get_connection() as conn:
-                # Achats du jour
+                # Achats du jour - VERSION CORRIGÉE
                 cursor = conn.execute("""
                     SELECT COUNT(*) FROM transactions 
                     WHERE order_side = 'BUY'
@@ -271,6 +273,9 @@ class DatabaseManager:
                 # Total transactions
                 cursor = conn.execute("SELECT COUNT(*) FROM transactions")
                 total_transactions = cursor.fetchone()[0]
+                
+                # Debug pour vérification
+                self.logger.debug(f"🔍 Stats quick: {daily_buys} achats aujourd'hui (range: {today_start}-{today_end})")
                 
                 return {
                     'daily_buys': daily_buys,
