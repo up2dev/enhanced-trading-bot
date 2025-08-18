@@ -276,7 +276,7 @@ class TradingEngine:
             self.logger.error(f"❌ Erreur log statistiques: {e}")
     
     def execute_buy_order(self, symbol: str, usdc_amount: float) -> Dict:
-        """Exécute un ordre d'achat avec commissions réelles"""
+        """Exécute un ordre d'achat avec gestion COMPLÈTE des fills multiples"""
         try:
             ticker = self.binance_client._make_request_with_retry(
                 self.binance_client.client.get_symbol_ticker,
@@ -284,13 +284,13 @@ class TradingEngine:
             )
             current_price = float(ticker['price'])
             quantity = usdc_amount / current_price
-            
+        
             # Timestamp pour le cooldown
             order_timestamp = int(time.time() * 1000)  # Timestamp en millisecondes pour cohérence
-            
+        
             if self.dry_run:
                 self.logger.info(f"🧪 SIMULATION ACHAT {symbol}: {quantity:.8f} à {current_price:.6f} USDC")
-                
+            
                 # Enregistrer en simulation pour tester le cooldown
                 self.database.insert_transaction(
                     symbol=symbol,
@@ -303,7 +303,7 @@ class TradingEngine:
                     commission=0.0,
                     commission_asset='USDC'
                 )
-                
+            
                 return {
                     'success': True,
                     'order': {'orderId': f'SIMULATION_{order_timestamp}', 'executedQty': str(quantity)},
@@ -311,105 +311,138 @@ class TradingEngine:
                     'quantity': quantity,
                     'simulation': True
                 }
-            
+        
             # ACHAT RÉEL avec validation des filtres
             symbol_info = self.binance_client._make_request_with_retry(
                 self.binance_client.client.get_symbol_info,
                 symbol=symbol
             )
-            
+        
             lot_size_filter = next(f for f in symbol_info['filters'] if f['filterType'] == 'LOT_SIZE')
             min_qty = float(lot_size_filter['minQty'])
             max_qty = float(lot_size_filter['maxQty'])
             step_size = float(lot_size_filter['stepSize'])
-            
+        
             quantity = min(max(quantity, min_qty), max_qty)
             quantity -= quantity % step_size
             quantity = round(quantity, 8)
-            
-            self.logger.info(f"💰 ACHAT RÉEL {symbol}: {quantity:.8f} à {current_price:.6f} USDC")
-            
+        
+            self.logger.info(f"💰 ACHAT RÉEL {symbol}: {quantity:.8f} à ~{current_price:.6f} USDC")
+        
             order = self.binance_client._make_request_with_retry(
                 self.binance_client.client.order_market_buy,
                 symbol=symbol,
                 quantity=quantity
             )
-            
-            self.logger.info(f"✅ Ordre d'achat exécuté: {symbol} - {quantity:.8f}")
-            
-            # 🔧 EXTRACTION DES COMMISSIONS RÉELLES (CORRECTION MAJEURE!)
-            commission = 0.0
-            commission_asset = 'USDC'
-            actual_price = current_price
-            actual_qty = quantity
-            
+        
+            # 🔥 GESTION COMPLÈTE DES FILLS MULTIPLES (CORRECTION MAJEURE!)
+            total_quantity = 0.0
+            total_value = 0.0
+            total_commission = 0.0
+            commission_asset = 'USDC'  # Par défaut
+            fills_count = 0
+        
             if 'fills' in order and order['fills']:
-                # Prendre les données du premier fill (le plus représentatif)
-                first_fill = order['fills'][0]
-                
-                # Prix et quantité réels d'exécution
-                actual_price = float(first_fill.get('price', current_price))
-                actual_qty = float(first_fill.get('qty', quantity))
-                
-                # Commission réelle
-                commission = float(first_fill.get('commission', 0.0))
-                commission_asset = first_fill.get('commissionAsset', 'USDC')
-                
-                self.logger.debug(f"💰 Commission réelle: {commission:.8f} {commission_asset}")
-                
-                # Si la commission est en BNB, optionnellement la convertir en USDC
-                if commission_asset == 'BNB' and commission > 0:
-                    try:
-                        # Récupérer le prix BNB/USDC pour conversion
-                        bnb_ticker = self.binance_client._make_request_with_retry(
-                            self.binance_client.client.get_symbol_ticker,
-                            symbol='BNBUSDC'
-                        )
-                        bnb_price = float(bnb_ticker['price'])
-                        commission_usdc = commission * bnb_price
-                        
-                        self.logger.debug(f"💰 Commission convertie: {commission_usdc:.6f} USDC (BNB @ {bnb_price:.2f})")
-                        
-                        # Option 1: Garder la commission en BNB (recommandé)
-                        # commission = commission (gardé tel quel)
-                        # commission_asset = 'BNB' (gardé tel quel)
-                        
-                        # Option 2: Convertir en USDC (si vous préférez)
-                        # commission = commission_usdc
-                        # commission_asset = 'BNB_TO_USDC'
-                        
-                    except Exception as e:
-                        self.logger.warning(f"⚠️  Impossible de convertir la commission BNB: {e}")
+                fills = order['fills']
+                fills_count = len(fills)
             
-            # Enregistrer avec les VRAIES données d'exécution
+                self.logger.info(f"📊 Ordre exécuté en {fills_count} fill(s):")
+            
+                for i, fill in enumerate(fills):
+                    fill_price = float(fill.get('price', 0))
+                    fill_qty = float(fill.get('qty', 0))
+                    fill_commission = float(fill.get('commission', 0))
+                    fill_commission_asset = fill.get('commissionAsset', 'USDC')
+                
+                    # Accumuler
+                    total_quantity += fill_qty
+                    total_value += fill_price * fill_qty
+                
+                    # Commission (garder l'asset de la première commission non-nulle)
+                    if fill_commission > 0:
+                        if total_commission == 0:  # Premier commission
+                            commission_asset = fill_commission_asset
+                    
+                        # Si même asset, additionner
+                        if fill_commission_asset == commission_asset:
+                            total_commission += fill_commission
+                        else:
+                            # Assets différents : garder la plus importante ou convertir
+                            self.logger.warning(f"⚠️  Commissions en assets différents: {fill_commission_asset} vs {commission_asset}")
+                            # Pour simplifier, on garde la première
+                            if total_commission == 0:
+                                total_commission = fill_commission
+                                commission_asset = fill_commission_asset
+                
+                    # Log détaillé des fills (max 5 pour pas spam)
+                    if i < 5:
+                        self.logger.info(f"   Fill {i+1}: {fill_qty:.8f} @ {fill_price:.6f} (comm: {fill_commission:.8f} {fill_commission_asset})")
+                    elif i == 5:
+                        self.logger.info(f"   ... et {fills_count - 5} autres fills")
+            
+                # Calculer le prix moyen pondéré
+                average_price = total_value / total_quantity if total_quantity > 0 else current_price
+            
+                # Logs récapitulatifs
+                self.logger.info(f"✅ RÉCAPITULATIF {symbol}:")
+                self.logger.info(f"   📊 {fills_count} fills = {total_quantity:.8f} {symbol.replace('USDC', '')}")
+                self.logger.info(f"   💰 Prix moyen: {average_price:.6f} USDC")
+                self.logger.info(f"   💸 Commission totale: {total_commission:.8f} {commission_asset}")
+                self.logger.info(f"   💵 Valeur totale: {total_value:.2f} USDC")
+            
+            else:
+                # Fallback si pas de fills (ne devrait pas arriver)
+                total_quantity = quantity
+                total_value = current_price * quantity
+                average_price = current_price
+                self.logger.warning(f"⚠️  Aucun fill détecté, utilisation des valeurs estimées")
+        
+            # 🔥 CONVERSION COMMISSION BNB (si nécessaire)
+            if commission_asset == 'BNB' and total_commission > 0:
+                try:
+                    bnb_ticker = self.binance_client._make_request_with_retry(
+                        self.binance_client.client.get_symbol_ticker,
+                        symbol='BNBUSDC'
+                    )
+                    bnb_price = float(bnb_ticker['price'])
+                    commission_usdc_value = total_commission * bnb_price
+                
+                    self.logger.info(f"💰 Commission BNB: {total_commission:.8f} BNB = ~{commission_usdc_value:.6f} USDC")
+                
+                except Exception as e:
+                    self.logger.warning(f"⚠️  Erreur conversion BNB: {e}")
+        
+            # 🔥 ENREGISTRER AVEC LES VRAIES DONNÉES TOTALES
             self.database.insert_transaction(
                 symbol=symbol,
                 order_id=str(order['orderId']),
-                transact_time=str(order.get('transactTime', order_timestamp)),  # Timestamp Binance si disponible
+                transact_time=str(order.get('transactTime', order_timestamp)),
                 order_type=order['type'],
                 order_side=order['side'],
-                price=actual_price,      # ✅ Prix réel d'exécution
-                qty=actual_qty,          # ✅ Quantité réelle exécutée
-                commission=commission,        # ✅ Commission réelle
-                commission_asset=commission_asset  # ✅ Asset de commission réel
+                price=average_price,        # ✅ Prix moyen pondéré de TOUS les fills
+                qty=total_quantity,         # ✅ Quantité totale de TOUS les fills  
+                commission=total_commission, # ✅ Commission totale de TOUS les fills
+                commission_asset=commission_asset
             )
-            
+        
             return {
                 'success': True,
                 'order': order,
-                'price': actual_price,   # Prix réel d'exécution
-                'quantity': actual_qty,  # Quantité réelle exécutée
-                'commission': commission,
+                'price': average_price,     # Prix moyen pondéré
+                'quantity': total_quantity, # Quantité totale réelle
+                'commission': total_commission,
                 'commission_asset': commission_asset,
+                'fills_count': fills_count,
+                'total_value': total_value,
                 'simulation': False
             }
-            
+        
         except Exception as e:
             self.logger.error(f"❌ Erreur ordre d'achat {symbol}: {e}")
             import traceback
             self.logger.debug(traceback.format_exc())
             return {'success': False, 'error': str(e)}
-    
+
     def execute_sell_order_with_stop_loss(self, symbol: str, bought_quantity: float, buy_price: float, profit_target: float, buy_transaction_id: int = None) -> Dict:
         """Exécute un ordre OCO avec profit + stop-loss + INSERTION EN BASE"""
         try:
