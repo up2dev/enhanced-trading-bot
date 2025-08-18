@@ -476,13 +476,24 @@ class TradingEngine:
             tick_size = float(next(f for f in symbol_info['filters'] if f['filterType'] == 'PRICE_FILTER')['tickSize'])
             step_size = float(next(f for f in symbol_info['filters'] if f['filterType'] == 'LOT_SIZE')['stepSize'])
             
-            # Formatage précis
+            # Formatage précis avec gestion complète des précisions
             price_precision = max(0, -int(np.log10(tick_size)))
+            qty_precision = max(0, -int(np.log10(step_size)))
+
+            # Prix formatés
             target_price = round(target_price / tick_size) * tick_size
-            stop_price = round(stop_price / tick_size) * tick_size  
+            stop_price = round(stop_price / tick_size) * tick_size
             stop_limit_price = round(stop_limit_price / tick_size) * tick_size
-            
+
+            # 🔧 CORRECTION: Quantité formatée avec précision exacte
             sell_quantity = round(sell_quantity / step_size) * step_size
+            sell_quantity = round(sell_quantity, qty_precision)
+
+            # Debug pour vérification
+            self.logger.debug(f"🔧 Formatage {symbol}:")
+            self.logger.debug(f"   Tick size: {tick_size} -> Prix précision: {price_precision}")
+            self.logger.debug(f"   Step size: {step_size} -> Qty précision: {qty_precision}")
+            self.logger.debug(f"   Quantité finale: {sell_quantity:.{qty_precision}f}")
             
             self.logger.info(f"🔄 Future transfer: {'Activé' if future_transfer_enabled else 'Désactivé'}")
             if future_transfer_enabled:
