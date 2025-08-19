@@ -451,20 +451,97 @@ class TradingEngine:
             use_oco_orders = self.risk_config.get('use_oco_orders', True)
             stop_loss_percentage = self.risk_config.get('stop_loss_percentage', -8.0)
             
-            # Calcul des quantités et prix
+            # 🔥 CORRECTION COMPLÈTE: Logique "récupérer investissement initial"
             if future_transfer_enabled:
-                sell_ratio = profit_target / 100  # 🔧 CORRECTION: Logique corrigée
-                sell_quantity = bought_quantity * sell_ratio
+                # Prix de vente cible
+                target_price = self.calculate_sell_price_limit(buy_price, profit_target)
+
+                # 🔍 RÉCUPÉRER LES FILTRES DYNAMIQUES DEPUIS BINANCE
+                try:
+                    symbol_info = self.binance_client._make_request_with_retry(
+                        self.binance_client.client.get_symbol_info,
+                        symbol=symbol
+                    )
+
+                    # Extraire les filtres importants
+                    notional_filter = None
+                    lot_size_filter = None
+
+                    for f in symbol_info['filters']:
+                        if f['filterType'] == 'NOTIONAL':
+                            notional_filter = f
+                        elif f['filterType'] == 'LOT_SIZE':
+                            lot_size_filter = f
+
+                    # Valeurs par défaut si filtres non trouvés
+                    min_notional = float(notional_filter.get('minNotional', 5.0)) if notional_filter else 5.0
+                    step_size = float(lot_size_filter.get('stepSize', 0.00000001)) if lot_size_filter else 0.00000001
+
+                    self.logger.debug(f"🔍 Filtres {symbol}:")
+                    self.logger.debug(f"   NOTIONAL min: {min_notional} USDC")
+                    self.logger.debug(f"   LOT_SIZE step: {step_size}")
+
+                except Exception as filter_error:
+                    self.logger.warning(f"⚠️  Erreur récupération filtres {symbol}: {filter_error}")
+                    # Valeurs de sécurité
+                    min_notional = 10.0  # Sécurité plus haute
+                    step_size = 0.00000001
+
+                # STRATÉGIE: Récupérer l'investissement initial en USDC
+                initial_investment_usdc = bought_quantity * buy_price
+
+                # Calculer combien vendre pour récupérer l'investissement
+                sell_quantity_for_investment = initial_investment_usdc / target_price
+
+                # Vérifier que ça respecte NOTIONAL minimum
+                min_sell_quantity_notional = min_notional / target_price
+
+                # Prendre le maximum pour respecter NOTIONAL
+                sell_quantity_raw = max(sell_quantity_for_investment, min_sell_quantity_notional)
+
+                # Arrondir selon LOT_SIZE step_size
+                qty_precision = max(0, -int(np.log10(step_size)))
+                sell_quantity = round(sell_quantity_raw / step_size) * step_size
+                sell_quantity = round(sell_quantity, qty_precision)
+
+                # S'assurer qu'on ne vend pas plus que ce qu'on a
+                sell_quantity = min(sell_quantity, bought_quantity * 0.99)  # Max 99%
+
+                # Le reste = profit pur en crypto
                 kept_quantity = bought_quantity - sell_quantity
-                target_price = buy_price * (1 + profit_target / 100)  # 🔧 CORRECTION
+
+                # Vérification finale
+                final_notional = sell_quantity * target_price
+                recovered_usdc = final_notional
+                profit_crypto = kept_quantity
+                profit_usdc_equivalent = profit_crypto * target_price
+
+                self.logger.info(f"🎯 STRATÉGIE: Récupérer investissement initial")
+                self.logger.info(f"   💰 Investissement initial: {initial_investment_usdc:.2f} USDC")
+                self.logger.info(f"   📈 Prix vente: {target_price:.6f} USDC")
+                self.logger.info(f"   📊 Quantité théorique: {sell_quantity_for_investment:.8f}")
+                self.logger.info(f"   📏 Quantité NOTIONAL-safe: {sell_quantity:.{qty_precision}f}")
+                self.logger.info(f"   💵 Valeur finale: {final_notional:.2f} USDC ({final_notional/min_notional:.1f}x NOTIONAL min)")
+                self.logger.info(f"   🏪 À vendre: {sell_quantity:.{qty_precision}f} → récupère {recovered_usdc:.2f} USDC")
+                self.logger.info(f"   💎 À garder: {kept_quantity:.8f} → profit {profit_usdc_equivalent:.2f} USDC équivalent")
+
+                # Alertes de sécurité
+                if final_notional < min_notional:
+                    self.logger.error(f"❌ NOTIONAL encore insuffisant: {final_notional:.2f} < {min_notional:.2f}")
+                    return {'success': False, 'error': f'Impossible de respecter NOTIONAL minimum {min_notional} USDC'}
+
+                if sell_quantity >= bought_quantity * 0.95:
+                    self.logger.warning(f"⚠️  Vente élevée: {(sell_quantity/bought_quantity)*100:.1f}% (accumulation faible)")
+
             else:
+                # Mode classique : vendre tout
                 sell_quantity = bought_quantity
                 kept_quantity = 0
                 target_price = buy_price * (1 + profit_target / 100)
             
             # Prix stop-loss
             stop_price = buy_price * (1 + stop_loss_percentage / 100)
-            stop_limit_buffer = self.risk_config.get('stop_limit_buffer', 0.001)  # 🔧 CORRECTION
+            stop_limit_buffer = self.risk_config.get('stop_limit_buffer', 0.001)
             stop_limit_price = stop_price * (1 - stop_limit_buffer)
             
             # Informations du symbole pour formatage
@@ -498,8 +575,8 @@ class TradingEngine:
             self.logger.info(f"🔄 Future transfer: {'Activé' if future_transfer_enabled else 'Désactivé'}")
             if future_transfer_enabled:
                 self.logger.info(f"   📦 Quantité achetée: {bought_quantity:.8f}")
-                self.logger.info(f"   🏪 Quantité à vendre: {sell_quantity:.8f} ({sell_ratio*100:.1f}%)")
-                self.logger.info(f"   💎 Quantité gardée: {kept_quantity:.8f} ({(100-profit_target):.1f}%)")
+                self.logger.info(f"   🏪 Quantité à vendre: {sell_quantity:.8f} ({(sell_quantity/bought_quantity)*100:.1f}%)")
+                self.logger.info(f"   💎 Quantité gardée: {kept_quantity:.8f} ({(kept_quantity/bought_quantity)*100:.1f}%)")
             
             self.logger.info(f"📊 ORDRE OCO {symbol}:")
             self.logger.info(f"   🎯 Profit: {target_price:.{price_precision}f} (+{profit_target}%)")
