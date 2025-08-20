@@ -66,11 +66,6 @@ class PerformanceAnalyzer:
             return row[key]
         except (KeyError, IndexError, TypeError):
             return default
-
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return default
     
     def get_trading_performance_with_holdings(self, days=30, symbol=None):
         """Analyse complète AVEC CRYPTO MISE DE CÔTÉ"""
