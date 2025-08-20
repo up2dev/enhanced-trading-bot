@@ -168,7 +168,7 @@ class PerformanceAnalyzer:
             print(f"\n💡 Différence due aux holdings: +{total_holdings_value:.2f} USDC ({(total_holdings_value/total_invested*100):+.2f}%)")
         
         print(f"\n🔄 {total_buys} achats, {total_sells} ventes")
-        print(f"🪙 {self._safe_int(stats['unique_symbols'])} cryptos différentes")
+        print(f"🪙 {self._safe_int(stats.get("unique_symbols", 0))} cryptos différentes")
         
         return {
             'invested': total_invested,
@@ -181,7 +181,7 @@ class PerformanceAnalyzer:
             'roi_with_holdings': roi_with_holdings,
             'buys': total_buys,
             'sells': total_sells,
-            'symbols': self._safe_int(stats['unique_symbols']),
+            'symbols': self._safe_int(stats.get("unique_symbols", 0)),
             'total_transactions': total_transactions
         }
 
