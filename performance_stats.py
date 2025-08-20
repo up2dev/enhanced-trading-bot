@@ -59,8 +59,12 @@ class PerformanceAnalyzer:
         """Convertit en int avec valeur par défaut"""
         if value is None:
             return default
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
 
-    def safe_row_access(self, row, key, default=None):
+    def self.safe_row_access(self, row, key, default=None):
         """Accès sécurisé aux Row SQLite"""
         try:
             return row[key]
@@ -156,8 +160,8 @@ class PerformanceAnalyzer:
             
             for crypto in kept_cryptos:
                 try:
-                    symbol = safe_row_access(crypto['symbol'])
-                    kept_qty = self._safe_float(safe_row_access(crypto['total_kept']))
+                    symbol = self.safe_row_access(crypto['symbol'])
+                    kept_qty = self._safe_float(self.safe_row_access(crypto['total_kept']))
                 except (KeyError, IndexError, TypeError):
                     continue
                 
@@ -277,7 +281,7 @@ class PerformanceAnalyzer:
                 roi = (profit / invested * 100) if invested > 0 else 0
                 
                 rows.append([
-                    safe_row_access(crypto['symbol']) or 'N/A',
+                    self.safe_row_access(crypto['symbol']) or 'N/A',
                     self._safe_int(crypto['transactions']),
                     self._safe_int(crypto['buys']),
                     self._safe_int(crypto['sells']),
@@ -410,7 +414,7 @@ class PerformanceAnalyzer:
             print(f"📊 Analyse détaillée de {len(executed_ocos)} ordres OCO exécutés:")
             
             for oco in executed_ocos:
-                symbol = safe_row_access(oco['symbol'])
+                symbol = self.safe_row_access(oco['symbol'])
                 initial_qty = self._safe_float(oco['initial_qty'])
                 execution_price = self._safe_float(oco['execution_price'])
                 execution_qty = self._safe_float(oco['execution_qty'])
@@ -425,7 +429,7 @@ class PerformanceAnalyzer:
                     AND created_at <= ?
                     ORDER BY created_at DESC
                     LIMIT 5
-                """, [symbol, safe_row_access(oco['created_at'])])
+                """, [symbol, self.safe_row_access(oco['created_at'])])
                 
                 buy_data = cursor_buy.fetchone()
                 avg_buy_price = self._safe_float(buy_data[1] if buy_data and len(buy_data) > 1 else 0) if buy_data else execution_price * 0.97  # Estimation
@@ -488,11 +492,11 @@ class PerformanceAnalyzer:
             # 4. TOP/FLOP OCO
             if profits_detail:
                 best_oco = max(profits_detail, key=lambda x: x['profit'])
-                print(f"\n🏆 Meilleur OCO: {best_safe_row_access(oco['symbol'])} → +{best_oco['profit']:.2f} USDC ({best_oco['roi']:+.1f}%)")
+                print(f"\n🏆 Meilleur OCO: {best_self.safe_row_access(oco['symbol'])} → +{best_oco['profit']:.2f} USDC ({best_oco['roi']:+.1f}%)")
             
             if losses_detail:
                 worst_oco = min(losses_detail, key=lambda x: x['loss'])
-                print(f"💀 Pire OCO: {worst_safe_row_access(oco['symbol'])} → {worst_oco['loss']:.2f} USDC ({worst_oco['roi']:+.1f}%)")
+                print(f"💀 Pire OCO: {worst_self.safe_row_access(oco['symbol'])} → {worst_oco['loss']:.2f} USDC ({worst_oco['roi']:+.1f}%)")
             
             # 5. STATISTIQUES DÉTAILLÉES
             profit_orders = len(profits_detail)
@@ -530,14 +534,14 @@ class PerformanceAnalyzer:
             rows = []
             
             for order in active_orders:
-                age_days = (datetime.now() - datetime.fromisoformat(safe_row_access(order['created_at']))).days
+                age_days = (datetime.now() - datetime.fromisoformat(self.safe_row_access(order['created_at']))).days
                 qty_total = self._safe_float(order['quantity'])
                 qty_kept = self._safe_float(order['kept_quantity'])
                 profit_target = self._safe_float(order['profit_target'])
                 stop_loss = self._safe_float(order['stop_loss_price'])
                 
                 rows.append([
-                    safe_row_access(order['symbol']).replace('USDC', ''),
+                    self.safe_row_access(order['symbol']).replace('USDC', ''),
                     f"{qty_total:.8f}",
                     f"{qty_kept:.8f}",
                     f"+{profit_target:.1f}%",
@@ -577,10 +581,10 @@ class PerformanceAnalyzer:
                 qty = self._safe_float(sell['qty'])
                 value = self._safe_float(sell['value'])
                 commission = self._safe_float(sell['commission'])
-                created_at = safe_row_access(sell['created_at']) or 'N/A'
+                created_at = self.safe_row_access(sell['created_at']) or 'N/A'
                 
                 rows.append([
-                    safe_row_access(sell['symbol']) or 'N/A',
+                    self.safe_row_access(sell['symbol']) or 'N/A',
                     created_at[:16] if len(created_at) > 16 else created_at,
                     f"{price:.6f}",
                     f"{qty:.8f}",
