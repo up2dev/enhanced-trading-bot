@@ -95,13 +95,41 @@ class PerformanceAnalyzer:
         
         stats = cursor.fetchone()
         
-        # Calculs de base
-        total_transactions = self._safe_int(stats['total_transactions'])
-        total_buys = self._safe_int(stats['total_buys'])
-        total_sells = self._safe_int(stats['total_sells'])
-        total_invested = self._safe_float(stats['total_invested'])
-        total_sold = self._safe_float(stats['total_sold'])
-        total_fees = self._safe_float(stats['total_fees'])
+        # Calculs de base SÉCURISÉS
+        try:
+            total_transactions = self._safe_int(stats['total_transactions'])
+        except (KeyError, IndexError, TypeError):
+            total_transactions = 0
+            
+        try:
+            total_buys = self._safe_int(stats['total_buys'])
+        except (KeyError, IndexError, TypeError):
+            total_buys = 0
+            
+        try:
+            total_sells = self._safe_int(stats['total_sells'])
+        except (KeyError, IndexError, TypeError):
+            total_sells = 0
+            
+        try:
+            total_invested = self._safe_float(stats['total_invested'])
+        except (KeyError, IndexError, TypeError):
+            total_invested = 0.0
+            
+        try:
+            total_sold = self._safe_float(stats['total_sold'])
+        except (KeyError, IndexError, TypeError):
+            total_sold = 0.0
+            
+        try:
+            total_fees = self._safe_float(stats['total_fees'])
+        except (KeyError, IndexError, TypeError):
+            total_fees = 0.0
+            
+        try:
+            unique_symbols = self._safe_int(stats['unique_symbols'])
+        except (KeyError, IndexError, TypeError):
+            unique_symbols = 0
         
         # 2. CALCULER LA VALEUR DES CRYPTOS MISES DE CÔTÉ
         print("🔍 Calcul de la valeur des cryptos mises de côté...")
@@ -124,8 +152,11 @@ class PerformanceAnalyzer:
             print("\n💎 Cryptos mises de côté:")
             
             for crypto in kept_cryptos:
-                symbol = crypto['symbol']
-                kept_qty = self._safe_float(crypto['total_kept'])
+                try:
+                    symbol = crypto['symbol']
+                    kept_qty = self._safe_float(crypto['total_kept'])
+                except (KeyError, IndexError, TypeError):
+                    continue
                 
                 if kept_qty > 0:
                     # Récupérer le dernier prix connu
@@ -168,10 +199,6 @@ class PerformanceAnalyzer:
             print(f"\n💡 Différence due aux holdings: +{total_holdings_value:.2f} USDC ({(total_holdings_value/total_invested*100):+.2f}%)")
         
         print(f"\n🔄 {total_buys} achats, {total_sells} ventes")
-        try:
-            unique_symbols = self._safe_int(stats['unique_symbols'])
-        except (KeyError, IndexError):
-            unique_symbols = 0
         print(f"🪙 {unique_symbols} cryptos différentes")
         
         return {
@@ -185,7 +212,7 @@ class PerformanceAnalyzer:
             'roi_with_holdings': roi_with_holdings,
             'buys': total_buys,
             'sells': total_sells,
-            'symbols': unique_symbols,
+            'symbols': unique_symbols,  # Variable locale sécurisée
             'total_transactions': total_transactions
         }
 
