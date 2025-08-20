@@ -160,8 +160,8 @@ class PerformanceAnalyzer:
             
             for crypto in kept_cryptos:
                 try:
-                    symbol = self.safe_row_access(crypto['symbol'])
-                    kept_qty = self._safe_float(self.safe_row_access(crypto['total_kept']))
+                    symbol = self.safe_row_access(crypto, 'symbol', 'UNKNOWN')
+                    kept_qty = self._safe_float(self.safe_row_access(crypto, 'total_kept', 0))
                 except (KeyError, IndexError, TypeError):
                     continue
                 
@@ -175,7 +175,7 @@ class PerformanceAnalyzer:
                     """, [symbol])
                     
                     last_price_row = cursor.fetchone()
-                    last_price = self._safe_float(last_price_row[0] if last_price_row and len(last_price_row) > 0 else 0) if last_price_row else 0
+                    last_price = self._safe_float(last_price_row[0]) if last_price_row else 0
                     
                     holding_value = kept_qty * last_price
                     total_holdings_value += holding_value
@@ -219,30 +219,9 @@ class PerformanceAnalyzer:
             'roi_with_holdings': roi_with_holdings,
             'buys': total_buys,
             'sells': total_sells,
-            'symbols': unique_symbols,  # Variable locale sécurisée
+            'symbols': unique_symbols,
             'total_transactions': total_transactions
         }
-
-    def get_current_holdings_from_binance(self):
-        """BONUS: Récupérer les vraies balances depuis Binance"""
-        try:
-            # Vous pouvez intégrer ici votre client Binance
-            # pour récupérer les vraies balances actuelles
-            
-            print("\n🔗 Récupération balances Binance...")
-            print("💡 Fonctionnalité à intégrer avec votre BinanceClient")
-            
-            # Exemple d'intégration:
-            # from src.binance_client import EnhancedBinanceClient
-            # client = EnhancedBinanceClient(api_key, api_secret)
-            # account = client.client.get_account()
-            # ... calculer la vraie valeur actuelle
-            
-            return 0.0  # Placeholder
-            
-        except Exception as e:
-            print(f"⚠️ Impossible de récupérer les balances Binance: {e}")
-            return 0.0
 
     def get_crypto_breakdown(self, days=30):
         """Performance par crypto - VERSION SÉCURISÉE"""
@@ -258,9 +237,7 @@ class PerformanceAnalyzer:
                 COALESCE(SUM(CASE WHEN order_side = 'SELL' THEN 1 ELSE 0 END), 0) as sells,
                 COALESCE(SUM(CASE WHEN order_side = 'BUY' THEN price * qty ELSE 0 END), 0) as invested,
                 COALESCE(SUM(CASE WHEN order_side = 'SELL' THEN price * qty ELSE 0 END), 0) as sold,
-                COALESCE(SUM(commission), 0) as fees,
-                AVG(CASE WHEN order_side = 'BUY' THEN price ELSE NULL END) as avg_buy_price,
-                AVG(CASE WHEN order_side = 'SELL' THEN price ELSE NULL END) as avg_sell_price
+                COALESCE(SUM(commission), 0) as fees
             FROM transactions 
             WHERE created_at >= ?
             GROUP BY symbol 
@@ -281,7 +258,7 @@ class PerformanceAnalyzer:
                 roi = (profit / invested * 100) if invested > 0 else 0
                 
                 rows.append([
-                    self.safe_row_access(crypto['symbol']) or 'N/A',
+                    self.safe_row_access(crypto, 'symbol', 'N/A'),
                     self._safe_int(crypto['transactions']),
                     self._safe_int(crypto['buys']),
                     self._safe_int(crypto['sells']),
@@ -381,142 +358,12 @@ class PerformanceAnalyzer:
             
             print(tabulate(rows, headers=headers, tablefmt="grid"))
         
-        # 2. CALCUL DÉTAILLÉ DU PROFIT OCO RÉEL
-        print(f"\n💰 === ANALYSE FINANCIÈRE OCO ===")
-        
-        # Récupérer tous les OCO avec leurs données complètes
-        cursor = self.conn.execute("""
-            SELECT 
-                symbol,
-                quantity as initial_qty,
-                COALESCE(execution_price, 0) as execution_price,
-                COALESCE(execution_qty, 0) as execution_qty,
-                COALESCE(kept_quantity, 0) as kept_qty,
-                profit_target,
-                stop_loss_price,
-                status,
-                created_at
-            FROM oco_orders 
-            WHERE status IN ('PROFIT_FILLED', 'STOP_FILLED')
-            ORDER BY created_at DESC
-        """)
-        
-        executed_ocos = cursor.fetchall()
-        
-        if executed_ocos:
-            total_profit_realized = 0.0
-            total_holdings_value = 0.0
-            total_initial_investment = 0.0
-            
-            profits_detail = []
-            losses_detail = []
-            
-            print(f"📊 Analyse détaillée de {len(executed_ocos)} ordres OCO exécutés:")
-            
-            for oco in executed_ocos:
-                symbol = self.safe_row_access(oco['symbol'])
-                initial_qty = self._safe_float(oco['initial_qty'])
-                execution_price = self._safe_float(oco['execution_price'])
-                execution_qty = self._safe_float(oco['execution_qty'])
-                kept_qty = self._safe_float(oco['kept_qty'])
-                status = oco['status']
-                
-                # Récupérer le prix d'achat initial depuis les transactions
-                cursor_buy = self.conn.execute("""
-                    SELECT AVG(price) as avg_buy_price, SUM(price * qty) / SUM(qty) as weighted_avg
-                    FROM transactions 
-                    WHERE symbol = ? AND order_side = 'BUY' 
-                    AND created_at <= ?
-                    ORDER BY created_at DESC
-                    LIMIT 5
-                """, [symbol, self.safe_row_access(oco['created_at'])])
-                
-                buy_data = cursor_buy.fetchone()
-                avg_buy_price = self._safe_float(buy_data[1] if buy_data and len(buy_data) > 1 else 0) if buy_data else execution_price * 0.97  # Estimation
-                
-                # Calculs financiers
-                initial_investment = initial_qty * avg_buy_price
-                realized_value = execution_qty * execution_price
-                realized_profit = realized_value - (execution_qty * avg_buy_price)
-                
-                # Valeur actuelle de la crypto gardée
-                cursor_current = self.conn.execute("""
-                    SELECT price FROM transactions 
-                    WHERE symbol = ? 
-                    ORDER BY created_at DESC 
-                    LIMIT 1
-                """, [symbol])
-                
-                current_price_row = cursor_current.fetchone()
-                current_price = self._safe_float(current_price_row[0] if current_price_row and len(current_price_row) > 0 else 0) if current_price_row else execution_price
-                
-                holdings_value = kept_qty * current_price
-                holdings_profit = holdings_value - (kept_qty * avg_buy_price)
-                
-                total_profit = realized_profit + holdings_profit
-                total_investment_for_this = initial_investment
-                roi = (total_profit / total_investment_for_this * 100) if total_investment_for_this > 0 else 0
-                
-                # Accumuler les totaux
-                total_profit_realized += realized_profit
-                total_holdings_value += holdings_value
-                total_initial_investment += initial_investment
-                
-                # Catégoriser
-                if status == 'PROFIT_FILLED':
-                    profits_detail.append({
-                        'symbol': symbol,
-                        'profit': total_profit,
-                        'roi': roi,
-                        'holdings_value': holdings_value
-                    })
-                else:
-                    losses_detail.append({
-                        'symbol': symbol,
-                        'loss': total_profit,  # Sera négatif
-                        'roi': roi,
-                        'holdings_value': holdings_value
-                    })
-            
-            # 3. RÉSUMÉ GLOBAL
-            total_holdings_profit = total_holdings_value - sum(self._safe_float(oco['kept_quantity']) * avg_buy_price for oco in executed_ocos if (kept_qty := self._safe_float(oco['kept_quantity'])) > 0)
-            global_profit = total_profit_realized + total_holdings_profit
-            global_roi = (global_profit / total_initial_investment * 100) if total_initial_investment > 0 else 0
-            
-            print(f"\n💰 RÉSUMÉ FINANCIER OCO:")
-            print(f"💵 Profit réalisé (ventes): {total_profit_realized:+.2f} USDC")
-            print(f"💎 Valeur actuelle gardée: {total_holdings_value:.2f} USDC")
-            print(f"📈 Profit total OCO: {global_profit:+.2f} USDC")
-            print(f"🎯 ROI global OCO: {global_roi:+.2f}%")
-            
-            # 4. TOP/FLOP OCO
-            if profits_detail:
-                best_oco = max(profits_detail, key=lambda x: x['profit'])
-                print(f"\n🏆 Meilleur OCO: {best_self.safe_row_access(oco['symbol'])} → +{best_oco['profit']:.2f} USDC ({best_oco['roi']:+.1f}%)")
-            
-            if losses_detail:
-                worst_oco = min(losses_detail, key=lambda x: x['loss'])
-                print(f"💀 Pire OCO: {worst_self.safe_row_access(oco['symbol'])} → {worst_oco['loss']:.2f} USDC ({worst_oco['roi']:+.1f}%)")
-            
-            # 5. STATISTIQUES DÉTAILLÉES
-            profit_orders = len(profits_detail)
-            loss_orders = len(losses_detail)
-            success_rate = (profit_orders / (profit_orders + loss_orders) * 100) if (profit_orders + loss_orders) > 0 else 0
-            
-            print(f"\n📊 STATISTIQUES OCO:")
-            print(f"✅ Ordres profitables: {profit_orders}")
-            print(f"❌ Ordres en perte: {loss_orders}")
-            print(f"🎯 Taux de réussite: {success_rate:.1f}%")
-            
-        else:
-            print("📭 Aucun ordre OCO exécuté trouvé")
-        
         # OCO actifs
         cursor = self.conn.execute("SELECT COUNT(*) FROM oco_orders WHERE status = 'ACTIVE'")
         active_oco = self._safe_int(cursor.fetchone()[0])
         print(f"\n🔄 Ordres OCO actifs: {active_oco}")
         
-        # 6. DÉTAIL DES OCO ACTIFS AVEC VALEUR ACTUELLE
+        # DÉTAIL DES OCO ACTIFS
         if active_oco > 0:
             print(f"\n📋 === DÉTAIL OCO ACTIFS ===")
             
@@ -534,22 +381,28 @@ class PerformanceAnalyzer:
             rows = []
             
             for order in active_orders:
-                age_days = (datetime.now() - datetime.fromisoformat(self.safe_row_access(order['created_at']))).days
-                qty_total = self._safe_float(order['quantity'])
-                qty_kept = self._safe_float(order['kept_quantity'])
-                profit_target = self._safe_float(order['profit_target'])
-                stop_loss = self._safe_float(order['stop_loss_price'])
-                
-                rows.append([
-                    self.safe_row_access(order['symbol']).replace('USDC', ''),
-                    f"{qty_total:.8f}",
-                    f"{qty_kept:.8f}",
-                    f"+{profit_target:.1f}%",
-                    f"{stop_loss:.6f}",
-                    f"{age_days}j"
-                ])
+                try:
+                    created_at = self.safe_row_access(order, 'created_at', '2024-01-01T00:00:00')
+                    age_days = (datetime.now() - datetime.fromisoformat(created_at)).days
+                    qty_total = self._safe_float(order['quantity'])
+                    qty_kept = self._safe_float(order['kept_quantity'])
+                    profit_target = self._safe_float(order['profit_target'])
+                    stop_loss = self._safe_float(order['stop_loss_price'])
+                    symbol = self.safe_row_access(order, 'symbol', 'UNKNOWN').replace('USDC', '')
+                    
+                    rows.append([
+                        symbol,
+                        f"{qty_total:.8f}",
+                        f"{qty_kept:.8f}",
+                        f"+{profit_target:.1f}%",
+                        f"{stop_loss:.6f}",
+                        f"{age_days}j"
+                    ])
+                except Exception as e:
+                    print(f"⚠️ Erreur traitement ordre: {e}")
             
-            print(tabulate(rows, headers=headers, tablefmt="grid"))
+            if rows:
+                print(tabulate(rows, headers=headers, tablefmt="grid"))
 
     def get_best_worst_trades(self, limit=10):
         """Meilleurs et pires trades - VERSION SÉCURISÉE"""
@@ -581,10 +434,11 @@ class PerformanceAnalyzer:
                 qty = self._safe_float(sell['qty'])
                 value = self._safe_float(sell['value'])
                 commission = self._safe_float(sell['commission'])
-                created_at = self.safe_row_access(sell['created_at']) or 'N/A'
+                created_at = self.safe_row_access(sell, 'created_at', 'N/A')
+                symbol = self.safe_row_access(sell, 'symbol', 'N/A')
                 
                 rows.append([
-                    self.safe_row_access(sell['symbol']) or 'N/A',
+                    symbol,
                     created_at[:16] if len(created_at) > 16 else created_at,
                     f"{price:.6f}",
                     f"{qty:.8f}",
@@ -630,7 +484,7 @@ class PerformanceAnalyzer:
             
             print(tabulate(rows, headers=headers, tablefmt="grid"))
             
-            # Moyennes - VERSION CORRIGÉE AVEC PROTECTION NULL
+            # Moyennes
             cursor = self.conn.execute("""
                 SELECT 
                     AVG(CAST(daily_count AS REAL)) as avg_daily,
@@ -646,7 +500,6 @@ class PerformanceAnalyzer:
             
             avg_stats = cursor.fetchone()
             
-            # Protection contre les NULL
             avg_daily = self._safe_float(avg_stats['avg_daily']) if avg_stats else 0.0
             max_daily = self._safe_int(avg_stats['max_daily']) if avg_stats else 0
             active_days = self._safe_int(avg_stats['active_days']) if avg_stats else 0
