@@ -185,7 +185,7 @@ class PerformanceAnalyzer:
             'roi_with_holdings': roi_with_holdings,
             'buys': total_buys,
             'sells': total_sells,
-            'symbols': self._safe_int(stats.get("unique_symbols", 0)),
+            'symbols': unique_symbols,
             'total_transactions': total_transactions
         }
 
