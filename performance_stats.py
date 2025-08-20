@@ -59,6 +59,14 @@ class PerformanceAnalyzer:
         """Convertit en int avec valeur par défaut"""
         if value is None:
             return default
+
+    def safe_row_access(self, row, key, default=None):
+        """Accès sécurisé aux Row SQLite"""
+        try:
+            return row[key]
+        except (KeyError, IndexError, TypeError):
+            return default
+
         try:
             return int(value)
         except (TypeError, ValueError):
@@ -153,8 +161,8 @@ class PerformanceAnalyzer:
             
             for crypto in kept_cryptos:
                 try:
-                    symbol = crypto['symbol']
-                    kept_qty = self._safe_float(crypto['total_kept'])
+                    symbol = safe_row_access(crypto['symbol'])
+                    kept_qty = self._safe_float(safe_row_access(crypto['total_kept']))
                 except (KeyError, IndexError, TypeError):
                     continue
                 
@@ -168,7 +176,7 @@ class PerformanceAnalyzer:
                     """, [symbol])
                     
                     last_price_row = cursor.fetchone()
-                    last_price = self._safe_float(last_price_row['price']) if last_price_row else 0
+                    last_price = self._safe_float(last_price_row[0] if last_price_row and len(last_price_row) > 0 else 0) if last_price_row else 0
                     
                     holding_value = kept_qty * last_price
                     total_holdings_value += holding_value
@@ -274,7 +282,7 @@ class PerformanceAnalyzer:
                 roi = (profit / invested * 100) if invested > 0 else 0
                 
                 rows.append([
-                    crypto['symbol'] or 'N/A',
+                    safe_row_access(crypto['symbol']) or 'N/A',
                     self._safe_int(crypto['transactions']),
                     self._safe_int(crypto['buys']),
                     self._safe_int(crypto['sells']),
@@ -407,7 +415,7 @@ class PerformanceAnalyzer:
             print(f"📊 Analyse détaillée de {len(executed_ocos)} ordres OCO exécutés:")
             
             for oco in executed_ocos:
-                symbol = oco['symbol']
+                symbol = safe_row_access(oco['symbol'])
                 initial_qty = self._safe_float(oco['initial_qty'])
                 execution_price = self._safe_float(oco['execution_price'])
                 execution_qty = self._safe_float(oco['execution_qty'])
@@ -422,10 +430,10 @@ class PerformanceAnalyzer:
                     AND created_at <= ?
                     ORDER BY created_at DESC
                     LIMIT 5
-                """, [symbol, oco['created_at']])
+                """, [symbol, safe_row_access(oco['created_at'])])
                 
                 buy_data = cursor_buy.fetchone()
-                avg_buy_price = self._safe_float(buy_data['weighted_avg']) if buy_data else execution_price * 0.97  # Estimation
+                avg_buy_price = self._safe_float(buy_data[1] if buy_data and len(buy_data) > 1 else 0) if buy_data else execution_price * 0.97  # Estimation
                 
                 # Calculs financiers
                 initial_investment = initial_qty * avg_buy_price
@@ -441,7 +449,7 @@ class PerformanceAnalyzer:
                 """, [symbol])
                 
                 current_price_row = cursor_current.fetchone()
-                current_price = self._safe_float(current_price_row['price']) if current_price_row else execution_price
+                current_price = self._safe_float(current_price_row[0] if current_price_row and len(current_price_row) > 0 else 0) if current_price_row else execution_price
                 
                 holdings_value = kept_qty * current_price
                 holdings_profit = holdings_value - (kept_qty * avg_buy_price)
@@ -485,11 +493,11 @@ class PerformanceAnalyzer:
             # 4. TOP/FLOP OCO
             if profits_detail:
                 best_oco = max(profits_detail, key=lambda x: x['profit'])
-                print(f"\n🏆 Meilleur OCO: {best_oco['symbol']} → +{best_oco['profit']:.2f} USDC ({best_oco['roi']:+.1f}%)")
+                print(f"\n🏆 Meilleur OCO: {best_safe_row_access(oco['symbol'])} → +{best_oco['profit']:.2f} USDC ({best_oco['roi']:+.1f}%)")
             
             if losses_detail:
                 worst_oco = min(losses_detail, key=lambda x: x['loss'])
-                print(f"💀 Pire OCO: {worst_oco['symbol']} → {worst_oco['loss']:.2f} USDC ({worst_oco['roi']:+.1f}%)")
+                print(f"💀 Pire OCO: {worst_safe_row_access(oco['symbol'])} → {worst_oco['loss']:.2f} USDC ({worst_oco['roi']:+.1f}%)")
             
             # 5. STATISTIQUES DÉTAILLÉES
             profit_orders = len(profits_detail)
@@ -527,14 +535,14 @@ class PerformanceAnalyzer:
             rows = []
             
             for order in active_orders:
-                age_days = (datetime.now() - datetime.fromisoformat(order['created_at'])).days
+                age_days = (datetime.now() - datetime.fromisoformat(safe_row_access(order['created_at']))).days
                 qty_total = self._safe_float(order['quantity'])
                 qty_kept = self._safe_float(order['kept_quantity'])
                 profit_target = self._safe_float(order['profit_target'])
                 stop_loss = self._safe_float(order['stop_loss_price'])
                 
                 rows.append([
-                    order['symbol'].replace('USDC', ''),
+                    safe_row_access(order['symbol']).replace('USDC', ''),
                     f"{qty_total:.8f}",
                     f"{qty_kept:.8f}",
                     f"+{profit_target:.1f}%",
@@ -574,10 +582,10 @@ class PerformanceAnalyzer:
                 qty = self._safe_float(sell['qty'])
                 value = self._safe_float(sell['value'])
                 commission = self._safe_float(sell['commission'])
-                created_at = sell['created_at'] or 'N/A'
+                created_at = safe_row_access(sell['created_at']) or 'N/A'
                 
                 rows.append([
-                    sell['symbol'] or 'N/A',
+                    safe_row_access(sell['symbol']) or 'N/A',
                     created_at[:16] if len(created_at) > 16 else created_at,
                     f"{price:.6f}",
                     f"{qty:.8f}",
@@ -654,7 +662,7 @@ class PerformanceAnalyzer:
             print("📊 Maximum quotidien: 0 transactions")
             print("📊 Jours actifs: 0/30")
     
-    def export_performance_report(self, filename=None):
+    def export_performance_report(self, filename=None, days=30):
         """Exporte un rapport complet"""
         if not filename:
             filename = f"performance_report_{datetime.now().strftime('%Y%m%d_%H%M')}.txt"
@@ -674,8 +682,8 @@ class PerformanceAnalyzer:
             print(f"📅 Généré le: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
             print("=" * 60)
             
-            self.get_trading_performance_with_holdings(30)
-            self.get_crypto_breakdown(30)
+            self.get_trading_performance_with_holdings(days)
+            self.get_crypto_breakdown(days)
             self.get_monthly_performance()
             self.get_oco_performance()
             self.get_best_worst_trades()
@@ -719,7 +727,7 @@ def main():
     
     try:
         if args.export:
-            analyzer.export_performance_report(args.export)
+            analyzer.export_performance_report(args.export, args.days)
         elif args.full:
             analyzer.get_trading_performance_with_holdings(args.days, args.symbol)
             analyzer.get_crypto_breakdown(args.days)
