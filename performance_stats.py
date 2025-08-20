@@ -622,56 +622,56 @@ def get_trading_performance_with_holdings(self, days=30, symbol=None):
                 print("📊 Maximum quotidien: 0 transactions")
                 print("📊 Jours actifs: 0/30")
         
-        def export_performance_report(self, filename=None):
-            """Exporte un rapport complet"""
-            if not filename:
-                filename = f"performance_report_{datetime.now().strftime('%Y%m%d_%H%M')}.txt"
-            
-            print(f"\n📄 === EXPORT RAPPORT ===")
-            print(f"Génération du rapport: {filename}")
-            
-            # Rediriger la sortie vers un fichier
-            from io import StringIO
-            
-            old_stdout = sys.stdout
-            sys.stdout = StringIO()
-            
-            try:
-                # Générer tous les rapports
-                print(f"🤖 RAPPORT DE PERFORMANCE TRADING BOT")
-                print(f"📅 Généré le: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                print("=" * 60)
-                
-                self.get_trading_performance_with_holdings(30)
-                self.get_crypto_breakdown(30)
-                self.get_monthly_performance()
-                self.get_oco_performance()
-                self.get_best_worst_trades()
-                self.get_trading_frequency()
-                
-                # Récupérer le contenu
-                report_content = sys.stdout.getvalue()
-                
-            except Exception as e:
-                report_content = f"Erreur génération rapport: {e}"
-            
-            finally:
-                sys.stdout = old_stdout
-            
-            # Sauvegarder le fichier
-            try:
-                with open(filename, 'w', encoding='utf-8') as f:
-                    f.write(report_content)
-                print(f"✅ Rapport sauvegardé: {filename}")
-                return filename
-            except Exception as e:
-                print(f"❌ Erreur sauvegarde: {e}")
-                return None
+    def export_performance_report(self, filename=None):
+        """Exporte un rapport complet"""
+        if not filename:
+            filename = f"performance_report_{datetime.now().strftime('%Y%m%d_%H%M')}.txt"
         
-        def close(self):
-            """Ferme la connexion"""
-            if self.conn:
-                self.conn.close()
+        print(f"\n📄 === EXPORT RAPPORT ===")
+        print(f"Génération du rapport: {filename}")
+        
+        # Rediriger la sortie vers un fichier
+        from io import StringIO
+        
+        old_stdout = sys.stdout
+        sys.stdout = StringIO()
+        
+        try:
+            # Générer tous les rapports
+            print(f"🤖 RAPPORT DE PERFORMANCE TRADING BOT")
+            print(f"📅 Généré le: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            print("=" * 60)
+            
+            self.get_trading_performance_with_holdings(30)
+            self.get_crypto_breakdown(30)
+            self.get_monthly_performance()
+            self.get_oco_performance()
+            self.get_best_worst_trades()
+            self.get_trading_frequency()
+            
+            # Récupérer le contenu
+            report_content = sys.stdout.getvalue()
+            
+        except Exception as e:
+            report_content = f"Erreur génération rapport: {e}"
+        
+        finally:
+            sys.stdout = old_stdout
+        
+        # Sauvegarder le fichier
+        try:
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write(report_content)
+            print(f"✅ Rapport sauvegardé: {filename}")
+            return filename
+        except Exception as e:
+            print(f"❌ Erreur sauvegarde: {e}")
+            return None
+    
+    def close(self):
+        """Ferme la connexion"""
+        if self.conn:
+            self.conn.close()
 
 def main():
     parser = argparse.ArgumentParser(description="Analyseur de performance Trading Bot (Version corrigée)")
