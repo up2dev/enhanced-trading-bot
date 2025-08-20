@@ -64,7 +64,7 @@ class PerformanceAnalyzer:
         except (TypeError, ValueError):
             return default
 
-    def self.safe_row_access(self, row, key, default=None):
+    def safe_row_access(self, row, key, default=None):
         """Accès sécurisé aux Row SQLite"""
         try:
             return row[key]
