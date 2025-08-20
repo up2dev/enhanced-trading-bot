@@ -168,7 +168,11 @@ class PerformanceAnalyzer:
             print(f"\n💡 Différence due aux holdings: +{total_holdings_value:.2f} USDC ({(total_holdings_value/total_invested*100):+.2f}%)")
         
         print(f"\n🔄 {total_buys} achats, {total_sells} ventes")
-        print(f"🪙 {self._safe_int(stats.get('unique_symbols', 0))} cryptos différentes")
+        try:
+            unique_symbols = self._safe_int(stats['unique_symbols'])
+        except (KeyError, IndexError):
+            unique_symbols = 0
+        print(f"🪙 {unique_symbols} cryptos différentes")
         
         return {
             'invested': total_invested,
