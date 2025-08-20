@@ -64,129 +64,129 @@ class PerformanceAnalyzer:
         except (TypeError, ValueError):
             return default
     
-def get_trading_performance_with_holdings(self, days=30, symbol=None):
-    """Analyse complète AVEC CRYPTO MISE DE CÔTÉ"""
-    print(f"\n📊 === ANALYSE DE PERFORMANCE COMPLÈTE ({days} derniers jours) ===")
-    
-    # Conditions de filtre (même code)
-    date_filter = datetime.now() - timedelta(days=days)
-    where_conditions = ["created_at >= ?"]
-    params = [date_filter.strftime('%Y-%m-%d')]
-    
-    if symbol:
-        where_conditions.append("symbol LIKE ?")
-        params.append(f"%{symbol.upper()}%")
-    
-    where_clause = " AND ".join(where_conditions)
-    
-    # 1. STATISTIQUES DE BASE (même code)
-    cursor = self.conn.execute(f"""
-        SELECT 
-            COUNT(*) as total_transactions,
-            COALESCE(SUM(CASE WHEN order_side = 'BUY' THEN 1 ELSE 0 END), 0) as total_buys,
-            COALESCE(SUM(CASE WHEN order_side = 'SELL' THEN 1 ELSE 0 END), 0) as total_sells,
-            COALESCE(SUM(CASE WHEN order_side = 'BUY' THEN price * qty ELSE 0 END), 0) as total_invested,
-            COALESCE(SUM(CASE WHEN order_side = 'SELL' THEN price * qty ELSE 0 END), 0) as total_sold,
-            COALESCE(SUM(commission), 0) as total_fees,
-            COUNT(DISTINCT symbol) as unique_symbols
-        FROM transactions 
-        WHERE {where_clause}
-    """, params)
-    
-    stats = cursor.fetchone()
-    
-    # Calculs de base
-    total_transactions = self._safe_int(stats['total_transactions'])
-    total_buys = self._safe_int(stats['total_buys'])
-    total_sells = self._safe_int(stats['total_sells'])
-    total_invested = self._safe_float(stats['total_invested'])
-    total_sold = self._safe_float(stats['total_sold'])
-    total_fees = self._safe_float(stats['total_fees'])
-    
-    # 2. 🆕 CALCULER LA VALEUR DES CRYPTOS MISES DE CÔTÉ
-    print("🔍 Calcul de la valeur des cryptos mises de côté...")
-    
-    # Récupérer les cryptos avec balance > 0 depuis les OCO
-    cursor = self.conn.execute(f"""
-        SELECT 
-            symbol,
-            COALESCE(SUM(kept_quantity), 0) as total_kept
-        FROM oco_orders 
-        WHERE kept_quantity > 0 
-        AND created_at >= ?
-        GROUP BY symbol
-    """, [date_filter.strftime('%Y-%m-%d')])
-    
-    kept_cryptos = cursor.fetchall()
-    total_holdings_value = 0.0
-    
-    if kept_cryptos:
-        print("\n💎 Cryptos mises de côté:")
+    def get_trading_performance_with_holdings(self, days=30, symbol=None):
+        """Analyse complète AVEC CRYPTO MISE DE CÔTÉ"""
+        print(f"\n📊 === ANALYSE DE PERFORMANCE COMPLÈTE ({days} derniers jours) ===")
         
-        for crypto in kept_cryptos:
-            symbol = crypto['symbol']
-            kept_qty = self._safe_float(crypto['total_kept'])
+        # Conditions de filtre
+        date_filter = datetime.now() - timedelta(days=days)
+        where_conditions = ["created_at >= ?"]
+        params = [date_filter.strftime('%Y-%m-%d')]
+        
+        if symbol:
+            where_conditions.append("symbol LIKE ?")
+            params.append(f"%{symbol.upper()}%")
+        
+        where_clause = " AND ".join(where_conditions)
+        
+        # 1. STATISTIQUES DE BASE
+        cursor = self.conn.execute(f"""
+            SELECT 
+                COUNT(*) as total_transactions,
+                COALESCE(SUM(CASE WHEN order_side = 'BUY' THEN 1 ELSE 0 END), 0) as total_buys,
+                COALESCE(SUM(CASE WHEN order_side = 'SELL' THEN 1 ELSE 0 END), 0) as total_sells,
+                COALESCE(SUM(CASE WHEN order_side = 'BUY' THEN price * qty ELSE 0 END), 0) as total_invested,
+                COALESCE(SUM(CASE WHEN order_side = 'SELL' THEN price * qty ELSE 0 END), 0) as total_sold,
+                COALESCE(SUM(commission), 0) as total_fees,
+                COUNT(DISTINCT symbol) as unique_symbols
+            FROM transactions 
+            WHERE {where_clause}
+        """, params)
+        
+        stats = cursor.fetchone()
+        
+        # Calculs de base
+        total_transactions = self._safe_int(stats['total_transactions'])
+        total_buys = self._safe_int(stats['total_buys'])
+        total_sells = self._safe_int(stats['total_sells'])
+        total_invested = self._safe_float(stats['total_invested'])
+        total_sold = self._safe_float(stats['total_sold'])
+        total_fees = self._safe_float(stats['total_fees'])
+        
+        # 2. CALCULER LA VALEUR DES CRYPTOS MISES DE CÔTÉ
+        print("🔍 Calcul de la valeur des cryptos mises de côté...")
+        
+        # Récupérer les cryptos avec balance > 0 depuis les OCO
+        cursor = self.conn.execute("""
+            SELECT 
+                symbol,
+                COALESCE(SUM(kept_quantity), 0) as total_kept
+            FROM oco_orders 
+            WHERE kept_quantity > 0 
+            AND created_at >= ?
+            GROUP BY symbol
+        """, [date_filter.strftime('%Y-%m-%d')])
+        
+        kept_cryptos = cursor.fetchall()
+        total_holdings_value = 0.0
+        
+        if kept_cryptos:
+            print("\n💎 Cryptos mises de côté:")
             
-            if kept_qty > 0:
-                # Récupérer le dernier prix connu
-                cursor = self.conn.execute("""
-                    SELECT price FROM transactions 
-                    WHERE symbol = ? 
-                    ORDER BY created_at DESC 
-                    LIMIT 1
-                """, [symbol])
+            for crypto in kept_cryptos:
+                symbol = crypto['symbol']
+                kept_qty = self._safe_float(crypto['total_kept'])
                 
-                last_price_row = cursor.fetchone()
-                last_price = self._safe_float(last_price_row['price']) if last_price_row else 0
-                
-                holding_value = kept_qty * last_price
-                total_holdings_value += holding_value
-                
-                print(f"   {symbol}: {kept_qty:.8f} @ {last_price:.6f} = {holding_value:.2f} USDC")
-    
-    # 3. 🆕 CALCUL CORRIGÉ DU PROFIT
-    net_profit_basic = total_sold - total_invested - total_fees
-    net_profit_with_holdings = net_profit_basic + total_holdings_value
-    
-    roi_basic = (net_profit_basic / total_invested * 100) if total_invested > 0 else 0
-    roi_with_holdings = (net_profit_with_holdings / total_invested * 100) if total_invested > 0 else 0
-    
-    # 4. AFFICHAGE DÉTAILLÉ
-    print(f"\n💰 === RÉSULTATS FINANCIERS ===")
-    print(f"💰 Investissement total: {total_invested:.2f} USDC")
-    print(f"💵 Ventes totales: {total_sold:.2f} USDC")
-    print(f"💎 Valeur cryptos gardées: {total_holdings_value:.2f} USDC")
-    print(f"💸 Frais totaux: {total_fees:.6f} USDC")
-    print(f"")
-    print(f"📈 Profit (ventes seules): {net_profit_basic:+.2f} USDC")
-    print(f"📈 Profit (avec holdings): {net_profit_with_holdings:+.2f} USDC")
-    print(f"")
-    print(f"🎯 ROI (ventes seules): {roi_basic:+.2f}%")
-    print(f"🎯 ROI (réel avec holdings): {roi_with_holdings:+.2f}%")
-    
-    if total_holdings_value > 0:
-        print(f"\n💡 Différence due aux holdings: +{total_holdings_value:.2f} USDC ({(total_holdings_value/total_invested*100):+.2f}%)")
-    
-    print(f"\n🔄 {total_buys} achats, {total_sells} ventes")
-    print(f"🪙 {self._safe_int(stats['unique_symbols'])} cryptos différentes")
-    
-    return {
-        'invested': total_invested,
-        'sold': total_sold,
-        'holdings_value': total_holdings_value,
-        'fees': total_fees,
-        'net_profit_basic': net_profit_basic,
-        'net_profit_with_holdings': net_profit_with_holdings,
-        'roi_basic': roi_basic,
-        'roi_with_holdings': roi_with_holdings,
-        'buys': total_buys,
-        'sells': total_sells,
-        'symbols': self._safe_int(stats['unique_symbols']),
-        'total_transactions': total_transactions
-    }
+                if kept_qty > 0:
+                    # Récupérer le dernier prix connu
+                    cursor = self.conn.execute("""
+                        SELECT price FROM transactions 
+                        WHERE symbol = ? 
+                        ORDER BY created_at DESC 
+                        LIMIT 1
+                    """, [symbol])
+                    
+                    last_price_row = cursor.fetchone()
+                    last_price = self._safe_float(last_price_row['price']) if last_price_row else 0
+                    
+                    holding_value = kept_qty * last_price
+                    total_holdings_value += holding_value
+                    
+                    print(f"   {symbol}: {kept_qty:.8f} @ {last_price:.6f} = {holding_value:.2f} USDC")
+        
+        # 3. CALCUL CORRIGÉ DU PROFIT
+        net_profit_basic = total_sold - total_invested - total_fees
+        net_profit_with_holdings = net_profit_basic + total_holdings_value
+        
+        roi_basic = (net_profit_basic / total_invested * 100) if total_invested > 0 else 0
+        roi_with_holdings = (net_profit_with_holdings / total_invested * 100) if total_invested > 0 else 0
+        
+        # 4. AFFICHAGE DÉTAILLÉ
+        print(f"\n💰 === RÉSULTATS FINANCIERS ===")
+        print(f"💰 Investissement total: {total_invested:.2f} USDC")
+        print(f"💵 Ventes totales: {total_sold:.2f} USDC")
+        print(f"💎 Valeur cryptos gardées: {total_holdings_value:.2f} USDC")
+        print(f"💸 Frais totaux: {total_fees:.6f} USDC")
+        print(f"")
+        print(f"📈 Profit (ventes seules): {net_profit_basic:+.2f} USDC")
+        print(f"📈 Profit (avec holdings): {net_profit_with_holdings:+.2f} USDC")
+        print(f"")
+        print(f"🎯 ROI (ventes seules): {roi_basic:+.2f}%")
+        print(f"🎯 ROI (réel avec holdings): {roi_with_holdings:+.2f}%")
+        
+        if total_holdings_value > 0:
+            print(f"\n💡 Différence due aux holdings: +{total_holdings_value:.2f} USDC ({(total_holdings_value/total_invested*100):+.2f}%)")
+        
+        print(f"\n🔄 {total_buys} achats, {total_sells} ventes")
+        print(f"🪙 {self._safe_int(stats['unique_symbols'])} cryptos différentes")
+        
+        return {
+            'invested': total_invested,
+            'sold': total_sold,
+            'holdings_value': total_holdings_value,
+            'fees': total_fees,
+            'net_profit_basic': net_profit_basic,
+            'net_profit_with_holdings': net_profit_with_holdings,
+            'roi_basic': roi_basic,
+            'roi_with_holdings': roi_with_holdings,
+            'buys': total_buys,
+            'sells': total_sells,
+            'symbols': self._safe_int(stats['unique_symbols']),
+            'total_transactions': total_transactions
+        }
 
     def get_current_holdings_from_binance(self):
-        """🆕 BONUS: Récupérer les vraies balances depuis Binance"""
+        """BONUS: Récupérer les vraies balances depuis Binance"""
         try:
             # Vous pouvez intégrer ici votre client Binance
             # pour récupérer les vraies balances actuelles
@@ -343,7 +343,7 @@ def get_trading_performance_with_holdings(self, days=30, symbol=None):
             
             print(tabulate(rows, headers=headers, tablefmt="grid"))
         
-        # 2. 🆕 CALCUL DÉTAILLÉ DU PROFIT OCO RÉEL
+        # 2. CALCUL DÉTAILLÉ DU PROFIT OCO RÉEL
         print(f"\n💰 === ANALYSE FINANCIÈRE OCO ===")
         
         # Récupérer tous les OCO avec leurs données complètes
@@ -441,7 +441,7 @@ def get_trading_performance_with_holdings(self, days=30, symbol=None):
                     })
             
             # 3. RÉSUMÉ GLOBAL
-            total_holdings_profit = total_holdings_value - sum(kept_qty * avg_buy_price for oco in executed_ocos if (kept_qty := self._safe_float(oco['kept_quantity'])) > 0)
+            total_holdings_profit = total_holdings_value - sum(self._safe_float(oco['kept_quantity']) * avg_buy_price for oco in executed_ocos if (kept_qty := self._safe_float(oco['kept_quantity'])) > 0)
             global_profit = total_profit_realized + total_holdings_profit
             global_roi = (global_profit / total_initial_investment * 100) if total_initial_investment > 0 else 0
             
@@ -473,12 +473,12 @@ def get_trading_performance_with_holdings(self, days=30, symbol=None):
         else:
             print("📭 Aucun ordre OCO exécuté trouvé")
         
-        # OCO actifs (inchangé)
+        # OCO actifs
         cursor = self.conn.execute("SELECT COUNT(*) FROM oco_orders WHERE status = 'ACTIVE'")
         active_oco = self._safe_int(cursor.fetchone()[0])
         print(f"\n🔄 Ordres OCO actifs: {active_oco}")
         
-        # 6. 🆕 DÉTAIL DES OCO ACTIFS AVEC VALEUR ACTUELLE
+        # 6. DÉTAIL DES OCO ACTIFS AVEC VALEUR ACTUELLE
         if active_oco > 0:
             print(f"\n📋 === DÉTAIL OCO ACTIFS ===")
             
@@ -512,116 +512,117 @@ def get_trading_performance_with_holdings(self, days=30, symbol=None):
                 ])
             
             print(tabulate(rows, headers=headers, tablefmt="grid"))
-        def get_best_worst_trades(self, limit=10):
-            """Meilleurs et pires trades - VERSION SÉCURISÉE"""
-            print(f"\n🏆 === TOP {limit} TRADES RÉCENTS ===")
-            
-            cursor = self.conn.execute(f"""
-                SELECT 
-                    symbol,
-                    created_at,
-                    order_side,
-                    price,
-                    qty,
-                    price * qty as value,
-                    commission
-                FROM transactions 
-                WHERE order_side = 'SELL'
-                ORDER BY created_at DESC
-                LIMIT {limit}
-            """)
-            
-            recent_sells = cursor.fetchall()
-            
-            if recent_sells:
-                headers = ["Crypto", "Date", "Prix vente", "Quantité", "Valeur", "Commission"]
-                rows = []
-                
-                for sell in recent_sells:
-                    price = self._safe_float(sell['price'])
-                    qty = self._safe_float(sell['qty'])
-                    value = self._safe_float(sell['value'])
-                    commission = self._safe_float(sell['commission'])
-                    created_at = sell['created_at'] or 'N/A'
-                    
-                    rows.append([
-                        sell['symbol'] or 'N/A',
-                        created_at[:16] if len(created_at) > 16 else created_at,
-                        f"{price:.6f}",
-                        f"{qty:.8f}",
-                        f"{value:.2f}",
-                        f"{commission:.6f}"
-                    ])
-                
-                print(tabulate(rows, headers=headers, tablefmt="grid"))
-            else:
-                print("📭 Aucune vente récente trouvée")
+
+    def get_best_worst_trades(self, limit=10):
+        """Meilleurs et pires trades - VERSION SÉCURISÉE"""
+        print(f"\n🏆 === TOP {limit} TRADES RÉCENTS ===")
         
-        def get_trading_frequency(self):
-            """Analyse de la fréquence de trading - VERSION CORRIGÉE"""
-            print(f"\n⏰ === FRÉQUENCE DE TRADING ===")
+        cursor = self.conn.execute(f"""
+            SELECT 
+                symbol,
+                created_at,
+                order_side,
+                price,
+                qty,
+                price * qty as value,
+                commission
+            FROM transactions 
+            WHERE order_side = 'SELL'
+            ORDER BY created_at DESC
+            LIMIT {limit}
+        """)
+        
+        recent_sells = cursor.fetchall()
+        
+        if recent_sells:
+            headers = ["Crypto", "Date", "Prix vente", "Quantité", "Valeur", "Commission"]
+            rows = []
             
-            # Transactions par jour des 30 derniers jours
+            for sell in recent_sells:
+                price = self._safe_float(sell['price'])
+                qty = self._safe_float(sell['qty'])
+                value = self._safe_float(sell['value'])
+                commission = self._safe_float(sell['commission'])
+                created_at = sell['created_at'] or 'N/A'
+                
+                rows.append([
+                    sell['symbol'] or 'N/A',
+                    created_at[:16] if len(created_at) > 16 else created_at,
+                    f"{price:.6f}",
+                    f"{qty:.8f}",
+                    f"{value:.2f}",
+                    f"{commission:.6f}"
+                ])
+            
+            print(tabulate(rows, headers=headers, tablefmt="grid"))
+        else:
+            print("📭 Aucune vente récente trouvée")
+    
+    def get_trading_frequency(self):
+        """Analyse de la fréquence de trading - VERSION CORRIGÉE"""
+        print(f"\n⏰ === FRÉQUENCE DE TRADING ===")
+        
+        # Transactions par jour des 30 derniers jours
+        cursor = self.conn.execute("""
+            SELECT 
+                date(created_at) as trading_date,
+                COUNT(*) as transactions,
+                COALESCE(SUM(CASE WHEN order_side = 'BUY' THEN 1 ELSE 0 END), 0) as buys,
+                COALESCE(SUM(CASE WHEN order_side = 'SELL' THEN 1 ELSE 0 END), 0) as sells
+            FROM transactions 
+            WHERE created_at >= date('now', '-30 days')
+            GROUP BY date(created_at)
+            ORDER BY trading_date DESC
+            LIMIT 10
+        """)
+        
+        daily_stats = cursor.fetchall()
+        
+        if daily_stats:
+            headers = ["Date", "Transactions", "Achats", "Ventes"]
+            rows = []
+            
+            for day in daily_stats:
+                rows.append([
+                    day['trading_date'] or 'N/A',
+                    self._safe_int(day['transactions']),
+                    self._safe_int(day['buys']),
+                    self._safe_int(day['sells'])
+                ])
+            
+            print(tabulate(rows, headers=headers, tablefmt="grid"))
+            
+            # Moyennes - VERSION CORRIGÉE AVEC PROTECTION NULL
             cursor = self.conn.execute("""
                 SELECT 
-                    date(created_at) as trading_date,
-                    COUNT(*) as transactions,
-                    COALESCE(SUM(CASE WHEN order_side = 'BUY' THEN 1 ELSE 0 END), 0) as buys,
-                    COALESCE(SUM(CASE WHEN order_side = 'SELL' THEN 1 ELSE 0 END), 0) as sells
-                FROM transactions 
-                WHERE created_at >= date('now', '-30 days')
-                GROUP BY date(created_at)
-                ORDER BY trading_date DESC
-                LIMIT 10
+                    AVG(CAST(daily_count AS REAL)) as avg_daily,
+                    MAX(daily_count) as max_daily,
+                    COUNT(*) as active_days
+                FROM (
+                    SELECT COUNT(*) as daily_count
+                    FROM transactions 
+                    WHERE created_at >= date('now', '-30 days')
+                    GROUP BY date(created_at)
+                )
             """)
             
-            daily_stats = cursor.fetchall()
+            avg_stats = cursor.fetchone()
             
-            if daily_stats:
-                headers = ["Date", "Transactions", "Achats", "Ventes"]
-                rows = []
-                
-                for day in daily_stats:
-                    rows.append([
-                        day['trading_date'] or 'N/A',
-                        self._safe_int(day['transactions']),
-                        self._safe_int(day['buys']),
-                        self._safe_int(day['sells'])
-                    ])
-                
-                print(tabulate(rows, headers=headers, tablefmt="grid"))
-                
-                # Moyennes - VERSION CORRIGÉE AVEC PROTECTION NULL
-                cursor = self.conn.execute("""
-                    SELECT 
-                        AVG(CAST(daily_count AS REAL)) as avg_daily,
-                        MAX(daily_count) as max_daily,
-                        COUNT(*) as active_days
-                    FROM (
-                        SELECT COUNT(*) as daily_count
-                        FROM transactions 
-                        WHERE created_at >= date('now', '-30 days')
-                        GROUP BY date(created_at)
-                    )
-                """)
-                
-                avg_stats = cursor.fetchone()
-                
-                # Protection contre les NULL
-                avg_daily = self._safe_float(avg_stats['avg_daily']) if avg_stats else 0.0
-                max_daily = self._safe_int(avg_stats['max_daily']) if avg_stats else 0
-                active_days = self._safe_int(avg_stats['active_days']) if avg_stats else 0
-                
-                print(f"\n📊 Moyenne quotidienne: {avg_daily:.1f} transactions")
-                print(f"📊 Maximum quotidien: {max_daily} transactions")
-                print(f"📊 Jours actifs: {active_days}/30")
-                
-            else:
-                print("📭 Aucune activité de trading dans les 30 derniers jours")
-                print("\n📊 Moyenne quotidienne: 0.0 transactions")
-                print("📊 Maximum quotidien: 0 transactions")
-                print("📊 Jours actifs: 0/30")
-        
+            # Protection contre les NULL
+            avg_daily = self._safe_float(avg_stats['avg_daily']) if avg_stats else 0.0
+            max_daily = self._safe_int(avg_stats['max_daily']) if avg_stats else 0
+            active_days = self._safe_int(avg_stats['active_days']) if avg_stats else 0
+            
+            print(f"\n📊 Moyenne quotidienne: {avg_daily:.1f} transactions")
+            print(f"📊 Maximum quotidien: {max_daily} transactions")
+            print(f"📊 Jours actifs: {active_days}/30")
+            
+        else:
+            print("📭 Aucune activité de trading dans les 30 derniers jours")
+            print("\n📊 Moyenne quotidienne: 0.0 transactions")
+            print("📊 Maximum quotidien: 0 transactions")
+            print("📊 Jours actifs: 0/30")
+    
     def export_performance_report(self, filename=None):
         """Exporte un rapport complet"""
         if not filename:
