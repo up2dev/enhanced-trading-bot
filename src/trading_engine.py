@@ -1096,8 +1096,8 @@ class TradingEngine:
                             order_side='SELL',  # 🎯 VENTE
                             price=exec_price,
                             qty=exec_qty,
-                            commission=0.0,  # Historique : commission pas toujours disponible
-                            commission_asset='USDC'
+			    commission = float(filled_order.get('commission', 0.0))
+                            commission_asset = filled_order.get('commissionAsset', 'USDC')
                         )
                         self.logger.info(f"   📝 Transaction VENTE historique créée")
                         
