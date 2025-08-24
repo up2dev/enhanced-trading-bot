@@ -444,7 +444,7 @@ class TradingEngine:
             return {'success': False, 'error': str(e)}
 
     def execute_sell_order_with_stop_loss(self, symbol: str, bought_quantity: float, buy_price: float, profit_target: float, buy_transaction_id: int = None) -> Dict:
-        """Exécute un ordre OCO avec profit + stop-loss + INSERTION EN BASE"""
+        """Exécute un ordre OCO avec profit + stop-loss + INSERTION EN BASE BULLETPROOF"""
         try:
             # Configuration des ordres
             future_transfer_enabled = self.advanced_config.get('future_transfer_enabled', True)
@@ -610,7 +610,7 @@ class TradingEngine:
                     
                     self.logger.info(f"✅ ORDRE OCO PLACÉ {symbol}")
                     
-                    # 🔥 EXTRACTION AMÉLIORÉE DES IDs D'ORDRES
+                    # 🔥 EXTRACTION IDS AVEC LOGIQUE DIAGNOSTIQUE CORRECTE
                     profit_order_id = None
                     stop_order_id = None
                     oco_order_list_id = oco_order.get('orderListId', '')
@@ -620,6 +620,7 @@ class TradingEngine:
                     orders = oco_order.get('orders', [])
                     self.logger.debug(f"🔍 Orders in OCO: {len(orders)}")
                     
+                    # 🎯 LOGIQUE BASÉE SUR VOTRE DIAGNOSTIC RÉUSSI
                     for i, order in enumerate(orders):
                         order_id = order.get('orderId')
                         order_type = order.get('type')
@@ -627,6 +628,7 @@ class TradingEngine:
                         
                         self.logger.debug(f"   Order {i+1}: ID={order_id}, Type={order_type}, Side={order_side}")
                         
+                        # ✅ LOGIQUE EXACTE IDENTIFIÉE PAR VOTRE DIAGNOSTIC
                         if order_type == 'LIMIT_MAKER':
                             profit_order_id = order_id
                             self.logger.info(f"   📈 Limite profit: {profit_order_id}")
@@ -642,7 +644,7 @@ class TradingEngine:
                     if not stop_order_id:
                         self.logger.warning(f"⚠️  STOP_ORDER_ID non trouvé dans la réponse OCO !")
                     
-                    # 🔥 INSERTION EN BASE (PARTIE CRUCIALE!)
+                    # 🔥 INSERTION EN BASE BULLETPROOF
                     try:
                         oco_db_id = self.database.insert_oco_order(
                             symbol=symbol,
@@ -658,9 +660,19 @@ class TradingEngine:
                         
                         self.logger.info(f"💾 Ordre OCO enregistré en base (DB ID: {oco_db_id})")
                         
+                        # Log de vérification insertion
+                        if profit_order_id and stop_order_id:
+                            self.logger.info(f"✅ INSERTION COMPLÈTE avec les 2 IDs")
+                        elif profit_order_id or stop_order_id:
+                            self.logger.warning(f"⚠️ INSERTION PARTIELLE (1 ID manquant)")
+                        else:
+                            self.logger.error(f"❌ INSERTION SANS IDs (problème critique)")
+                        
                     except Exception as db_error:
                         # L'ordre est placé sur Binance mais pas en base - log l'erreur
                         self.logger.error(f"❌ Erreur insertion OCO en base: {db_error}")
+                        import traceback
+                        self.logger.debug(traceback.format_exc())
                         oco_db_id = None
                     
                     return {
@@ -727,7 +739,7 @@ class TradingEngine:
             
             for oco_order in active_oco_orders:
                 try:
-                    # Vérification DOUBLE pour plus de fiabilité
+                    # Vérification avec méthode robuste
                     was_updated = self._check_oco_status_enhanced(oco_order)
                     if was_updated:
                         updated_count += 1
@@ -742,7 +754,7 @@ class TradingEngine:
             self.logger.error(f"❌ Erreur surveillance OCO: {e}")
 
     def _check_oco_status_enhanced(self, oco_order: Dict) -> bool:
-        """Version améliorée de vérification OCO avec double vérification"""
+        """Version robuste de vérification OCO avec détection d'exécution"""
         try:
             symbol = oco_order['symbol']
             profit_order_id = oco_order.get('profit_order_id')
@@ -750,7 +762,7 @@ class TradingEngine:
             
             # VÉRIFICATION DIRECTE des ordres individuels (plus fiable)
             for order_id, order_type in [(profit_order_id, 'PROFIT'), (stop_order_id, 'STOP')]:
-                if not order_id:
+                if not order_id or order_id == '':
                     continue
                     
                 try:
@@ -775,7 +787,7 @@ class TradingEngine:
             return False
 
     def _handle_oco_execution_direct(self, oco_order: Dict, executed_order: Dict, execution_type: str):
-        """🔥 VERSION CORRIGÉE - Traite l'exécution OCO avec création transaction BULLETPROOF"""
+        """🔥 Traite l'exécution OCO avec création transaction BULLETPROOF"""
         try:
             symbol = oco_order['symbol']
             oco_order_id = oco_order['oco_order_id']
@@ -808,7 +820,7 @@ class TradingEngine:
                 execution_type
             )
             
-            # 2. 🔥 CRÉER LA TRANSACTION DE VENTE (MÉTHODE BULLETPROOF)
+            # 2. 🔥 CRÉER LA TRANSACTION DE VENTE (BULLETPROOF)
             try:
                 # Vérifier si la transaction existe déjà - MÉTHODE SQL DIRECTE
                 cursor = self.database.conn.execute(
@@ -844,267 +856,3 @@ class TradingEngine:
             self.logger.error(f"❌ Erreur traitement exécution directe: {e}")
             import traceback
             self.logger.debug(traceback.format_exc())
-
-    def _check_oco_status(self, oco_order: Dict):
-        """Vérifie le statut d'un ordre OCO sur Binance avec méthode robuste - VERSION LEGACY"""
-        try:
-            symbol = oco_order['symbol']
-            oco_order_id = oco_order['oco_order_id']
-            profit_order_id = oco_order.get('profit_order_id')
-            stop_order_id = oco_order.get('stop_order_id')
-            
-            # 🔥 MÉTHODE 1: Vérifier via les ordres ouverts (plus fiable)
-            try:
-                open_orders = self.binance_client._make_request_with_retry(
-                    self.binance_client.client.get_open_orders,
-                    symbol=symbol
-                )
-                
-                # Chercher nos ordres dans la liste
-                profit_found = False
-                stop_found = False
-                oco_found = False
-                
-                for order in open_orders:
-                    order_list_id = str(order.get('orderListId', -1))
-                    order_id = str(order.get('orderId'))
-                    
-                    # Vérifier si c'est notre OCO
-                    if order_list_id == str(oco_order_id):
-                        oco_found = True
-                        
-                    # Vérifier les ordres individuels aussi (backup)
-                    if profit_order_id and order_id == str(profit_order_id):
-                        profit_found = True
-                    if stop_order_id and order_id == str(stop_order_id):
-                        stop_found = True
-                
-                if oco_found or profit_found or stop_found:
-                    # OCO encore actif
-                    self.logger.debug(f"📊 OCO {symbol} toujours actif (oco:{oco_found}, profit:{profit_found}, stop:{stop_found})")
-                    return
-                
-                # OCO plus dans les ordres ouverts = exécuté !
-                self.logger.info(f"🎯 OCO {symbol} n'est plus actif → Recherche dans l'historique")
-                
-            except Exception as open_orders_error:
-                self.logger.warning(f"⚠️  Erreur vérification ordres ouverts: {open_orders_error}")
-            
-            # 🔥 MÉTHODE 2: Vérifier dans l'historique récent
-            try:
-                # Historique des dernières 24h
-                yesterday = datetime.now() - timedelta(hours=24)
-                start_time = int(yesterday.timestamp() * 1000)
-                
-                all_orders = self.binance_client._make_request_with_retry(
-                    self.binance_client.client.get_all_orders,
-                    symbol=symbol,
-                    startTime=start_time,
-                    limit=100
-                )
-                
-                # Chercher les ordres de notre OCO
-                executed_orders = []
-                for order in all_orders:
-                    order_list_id = str(order.get('orderListId', -1))
-                    
-                    if order_list_id == str(oco_order_id):
-                        executed_orders.append(order)
-                
-                if executed_orders:
-                    self.logger.info(f"📜 Trouvé {len(executed_orders)} ordres dans l'historique pour OCO {oco_order_id}")
-                    
-                    # Analyser les ordres exécutés
-                    for order in executed_orders:
-                        status = order.get('status')
-                        order_type = order.get('type')
-                        
-                        self.logger.info(f"   - Status: {status}, Type: {order_type}")
-                        
-                        if status == 'FILLED':
-                            # Ordre exécuté ! Traiter l'exécution
-                            self._handle_oco_execution_from_history(oco_order, executed_orders)
-                            return
-                    
-                    # Si aucun FILLED mais ordres trouvés = probablement annulés
-                    self.logger.warning(f"⚠️  OCO {oco_order_id} trouvé dans l'historique mais aucun ordre FILLED")
-                    self.database.update_oco_execution(oco_order_id, 'EXPIRED_OR_CANCELED', 0, 0, 'UNKNOWN')
-                    
-                else:
-                    self.logger.warning(f"❓ OCO {oco_order_id} non trouvé dans l'historique récent")
-                    
-            except Exception as history_error:
-                self.logger.error(f"❌ Erreur vérification historique: {history_error}")
-                
-        except Exception as e:
-            self.logger.error(f"❌ Erreur vérification OCO {oco_order.get('symbol', 'UNKNOWN')}: {e}")
-
-    def _handle_oco_execution(self, oco_order: Dict, binance_status: Dict):
-        """Traite l'exécution d'un ordre OCO avec commissions réelles - VERSION LEGACY"""
-        try:
-            symbol = oco_order['symbol']
-            oco_order_id = oco_order['oco_order_id']
-            
-            # Déterminer quel ordre s'est exécuté
-            executed_order = None
-            execution_type = None
-            
-            for order in binance_status.get('orders', []):
-                if order['status'] == 'FILLED':
-                    executed_order = order
-                    if str(order['orderId']) == str(oco_order.get('profit_order_id', '')):
-                        execution_type = 'PROFIT'
-                    elif str(order['orderId']) == str(oco_order.get('stop_order_id', '')):
-                        execution_type = 'STOP_LOSS'
-                    break
-            
-            if executed_order and execution_type:
-                # Prix et quantité d'exécution
-                exec_price = float(executed_order['price'])
-                exec_qty = float(executed_order['executedQty'])
-                
-                # Commission réelle (si disponible)
-                commission = float(executed_order.get('commission', 0.0))
-                commission_asset = executed_order.get('commissionAsset', 'USDC')
-                
-                # Log de l'événement
-                if execution_type == 'PROFIT':
-                    self.logger.info(f"🎯 PROFIT RÉALISÉ {symbol}!")
-                    self.logger.info(f"   📈 Prix: {exec_price:.6f} USDC")
-                    self.logger.info(f"   📦 Quantité: {exec_qty:.8f}")
-                    self.logger.info(f"   💎 Crypto gardée: {oco_order.get('kept_quantity', 0):.8f} {symbol.replace('USDC', '')}")
-                    if commission > 0:
-                        self.logger.info(f"   💰 Commission: {commission:.8f} {commission_asset}")
-                    new_status = 'PROFIT_FILLED'
-                    
-                elif execution_type == 'STOP_LOSS':
-                    self.logger.warning(f"🛡️  STOP-LOSS DÉCLENCHÉ {symbol}")
-                    self.logger.warning(f"   📉 Prix: {exec_price:.6f} USDC") 
-                    self.logger.warning(f"   📦 Quantité: {exec_qty:.8f}")
-                    self.logger.warning(f"   💎 Crypto gardée: {oco_order.get('kept_quantity', 0):.8f} {symbol.replace('USDC', '')}")
-                    if commission > 0:
-                        self.logger.warning(f"   💰 Commission: {commission:.8f} {commission_asset}")
-                    new_status = 'STOP_FILLED'
-                
-                # Mettre à jour la DB
-                self.database.update_oco_execution(
-                    oco_order_id, 
-                    new_status, 
-                    exec_price, 
-                    exec_qty, 
-                    execution_type
-                )
-                
-                # 🔥 AUSSI CRÉER LA TRANSACTION DE VENTE (AJOUT CRUCIAL)
-                try:
-                    # Vérifier si elle existe déjà
-                    cursor = self.database.conn.execute(
-                        "SELECT id FROM transactions WHERE order_id = ? AND order_side = 'SELL'",
-                        (str(executed_order['orderId']),)
-                    )
-                    existing_tx = cursor.fetchone()
-                    
-                    if not existing_tx:
-                        # Enregistrer la transaction de vente avec commission réelle
-                        self.database.insert_transaction(
-                            symbol=symbol,
-                            order_id=str(executed_order['orderId']),
-                            transact_time=str(executed_order.get('time', int(time.time() * 1000))),
-                            order_type=executed_order.get('type', 'LIMIT'),
-                            order_side='SELL',  # 🎯 VENTE
-                            price=exec_price,
-                            qty=exec_qty,
-                            commission=commission,           # ✅ Commission réelle
-                            commission_asset=commission_asset  # ✅ Asset de commission réel
-                        )
-                        self.logger.info(f"   📝 Transaction VENTE créée")
-                        
-                except Exception as tx_error:
-                    self.logger.warning(f"⚠️ Erreur création transaction: {tx_error}")
-                
-                self.logger.info(f"💾 Exécution OCO {execution_type} enregistrée en base")
-                
-            else:
-                self.logger.warning(f"⚠️  OCO {oco_order_id} terminé mais aucun ordre FILLED trouvé")
-                # Marquer comme terminé quand même
-                self.database.update_oco_execution(oco_order_id, 'COMPLETED_UNKNOWN', 0, 0, 'UNKNOWN')
-                        
-        except Exception as e:
-            self.logger.error(f"❌ Erreur traitement exécution OCO: {e}")
-            import traceback
-            self.logger.debug(traceback.format_exc())
-
-    def _handle_oco_execution_from_history(self, oco_order: Dict, executed_orders: List[Dict]):
-        """🔥 VERSION CORRIGÉE - Traite l'exécution OCO depuis l'historique avec transaction"""
-        try:
-            symbol = oco_order['symbol']
-            oco_order_id = oco_order['oco_order_id']
-            
-            # Trouver l'ordre FILLED
-            filled_order = None
-            execution_type = None
-            
-            for order in executed_orders:
-                if order['status'] == 'FILLED':
-                    filled_order = order
-                    
-                    # Déterminer le type d'exécution
-                    order_type = order.get('type')
-                    if order_type == 'LIMIT_MAKER':
-                        execution_type = 'PROFIT'
-                    elif order_type in ['STOP_LOSS_LIMIT', 'STOP_LOSS']:
-                        execution_type = 'STOP_LOSS'
-                    break
-            
-            if filled_order and execution_type:
-                exec_price = float(filled_order['price'])
-                exec_qty = float(filled_order['executedQty'])
-                order_id = str(filled_order['orderId'])
-                
-                if execution_type == 'PROFIT':
-                    self.logger.info(f"🎯 PROFIT HISTORIQUE DÉTECTÉ {symbol}!")
-                    new_status = 'PROFIT_FILLED'
-                else:
-                    self.logger.warning(f"🛡️  STOP-LOSS HISTORIQUE DÉTECTÉ {symbol}")
-                    new_status = 'STOP_FILLED'
-                
-                # Mettre à jour la DB
-                self.database.update_oco_execution(
-                    oco_order_id, 
-                    new_status, 
-                    exec_price, 
-                    exec_qty, 
-                    execution_type
-                )
-                
-                # 🔥 CRÉER LA TRANSACTION DE VENTE (AJOUT CRUCIAL)
-                try:
-                    # Vérifier si elle existe déjà
-                    cursor = self.database.conn.execute(
-                        "SELECT id FROM transactions WHERE order_id = ? AND order_side = 'SELL'",
-                        (order_id,)
-                    )
-                    existing_tx = cursor.fetchone()
-                    
-                    if not existing_tx:
-                        # Enregistrer la transaction de vente
-                        self.database.insert_transaction(
-                            symbol=symbol,
-                            order_id=order_id,
-                            transact_time=str(filled_order.get('updateTime', int(time.time() * 1000))),
-                            order_type=filled_order.get('type', 'LIMIT'),
-                            order_side='SELL',  # 🎯 VENTE
-                            price=exec_price,
-                            qty=exec_qty,
-			    commission = float(filled_order.get('commission', 0.0)),
-                            commission_asset = filled_order.get('commissionAsset', 'USDC')
-                        )
-                        self.logger.info(f"   📝 Transaction VENTE historique créée")
-                        
-                except Exception as tx_error:
-                    self.logger.warning(f"⚠️ Erreur création transaction historique: {tx_error}")
-                
-                self.logger.info(f"💾 Exécution OCO historique enregistrée")
-                
-        except Exception as e:
-            self.logger.error(f"❌ Erreur traitement exécution historique: {e}")
