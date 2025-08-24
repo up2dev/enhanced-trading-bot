@@ -610,7 +610,7 @@ class TradingEngine:
                     
                     self.logger.info(f"✅ ORDRE OCO PLACÉ {symbol}")
                     
-                    # 🔥 EXTRACTION IDS BULLETPROOF - UTILISER orderReports !
+                    # 🔥 EXTRACTION IDS CORRIGÉE - UTILISER orderReports !
                     profit_order_id = None
                     stop_order_id = None
                     oco_order_list_id = oco_order.get('orderListId', '')
@@ -621,43 +621,28 @@ class TradingEngine:
                     order_reports = oco_order.get('orderReports', [])
                     self.logger.debug(f"🔍 OrderReports in OCO: {len(order_reports)}")
                     
-                    if not order_reports:
-                        self.logger.error(f"❌ Pas d'orderReports dans la réponse OCO!")
-                        # Log de debug complet
-                        import json
-                        self.logger.error(f"Réponse OCO complète: {json.dumps(oco_order, indent=2)}")
-                    
                     for i, order in enumerate(order_reports):
                         order_id = order.get('orderId')
                         order_type = order.get('type')
                         order_side = order.get('side', '')
-                        order_price = order.get('price', 'N/A')
-                        stop_price_field = order.get('stopPrice', 'N/A')
                         
-                        self.logger.info(f"  OrderReport {i+1}: ID={order_id}, Type={order_type}, Side={order_side}")
-                        self.logger.debug(f"    Price={order_price}, StopPrice={stop_price_field}")
+                        self.logger.debug(f"   OrderReport {i+1}: ID={order_id}, Type={order_type}, Side={order_side}")
                         
                         # ✅ LOGIQUE EXACTE BASÉE SUR VOTRE TEST RÉUSSI
                         if order_type == 'LIMIT_MAKER':
                             profit_order_id = order_id
-                            self.logger.info(f"   📈 Profit Order: {profit_order_id}")
+                            self.logger.info(f"   📈 Limite profit: {profit_order_id}")
                         elif order_type == 'STOP_LOSS_LIMIT':
                             stop_order_id = order_id 
-                            self.logger.info(f"   🛡️ Stop Order: {stop_order_id}")
+                            self.logger.info(f"   🛡️  Stop-loss: {stop_order_id}")
                         else:
-                            self.logger.warning(f"   ❓ Type inconnu: {order_type}")
+                            self.logger.warning(f"   ❓ Type d'ordre inattendu: {order_type}")
                     
-                    # Vérification finale avec logs détaillés
-                    self.logger.info(f"🎯 === RÉSULTAT EXTRACTION IDs ===")
-                    self.logger.info(f"Profit Order ID: {profit_order_id}")
-                    self.logger.info(f"Stop Order ID: {stop_order_id}")
-                    
-                    if profit_order_id and stop_order_id:
-                        self.logger.info(f"✅ EXTRACTION RÉUSSIE - 2 IDs récupérés")
-                    elif profit_order_id or stop_order_id:
-                        self.logger.warning(f"⚠️ EXTRACTION PARTIELLE - 1 seul ID récupéré")
-                    else:
-                        self.logger.error(f"❌ EXTRACTION ÉCHOUÉE - Aucun ID récupéré")
+                    # Vérification finale
+                    if not profit_order_id:
+                        self.logger.warning(f"⚠️  PROFIT_ORDER_ID non trouvé dans orderReports !")
+                    if not stop_order_id:
+                        self.logger.warning(f"⚠️  STOP_ORDER_ID non trouvé dans orderReports !")
                     
                     # 🔥 INSERTION EN BASE BULLETPROOF
                     try:
