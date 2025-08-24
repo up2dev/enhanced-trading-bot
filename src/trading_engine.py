@@ -610,25 +610,25 @@ class TradingEngine:
                     
                     self.logger.info(f"✅ ORDRE OCO PLACÉ {symbol}")
                     
-                    # 🔥 EXTRACTION IDS AVEC LOGIQUE DIAGNOSTIQUE CORRECTE
+                    # 🔥 EXTRACTION IDS CORRIGÉE - UTILISER orderReports !
                     profit_order_id = None
                     stop_order_id = None
                     oco_order_list_id = oco_order.get('orderListId', '')
                     
                     self.logger.debug(f"🔍 OCO Response: orderListId={oco_order_list_id}")
                     
-                    orders = oco_order.get('orders', [])
-                    self.logger.debug(f"🔍 Orders in OCO: {len(orders)}")
+                    # 🎯 CLEF DU SUCCÈS: orderReports contient les types !
+                    order_reports = oco_order.get('orderReports', [])
+                    self.logger.debug(f"🔍 OrderReports in OCO: {len(order_reports)}")
                     
-                    # 🎯 LOGIQUE BASÉE SUR VOTRE DIAGNOSTIC RÉUSSI
-                    for i, order in enumerate(orders):
+                    for i, order in enumerate(order_reports):
                         order_id = order.get('orderId')
                         order_type = order.get('type')
                         order_side = order.get('side', '')
                         
-                        self.logger.debug(f"   Order {i+1}: ID={order_id}, Type={order_type}, Side={order_side}")
+                        self.logger.debug(f"   OrderReport {i+1}: ID={order_id}, Type={order_type}, Side={order_side}")
                         
-                        # ✅ LOGIQUE EXACTE IDENTIFIÉE PAR VOTRE DIAGNOSTIC
+                        # ✅ LOGIQUE EXACTE BASÉE SUR VOTRE TEST RÉUSSI
                         if order_type == 'LIMIT_MAKER':
                             profit_order_id = order_id
                             self.logger.info(f"   📈 Limite profit: {profit_order_id}")
@@ -640,9 +640,9 @@ class TradingEngine:
                     
                     # Vérification finale
                     if not profit_order_id:
-                        self.logger.warning(f"⚠️  PROFIT_ORDER_ID non trouvé dans la réponse OCO !")
+                        self.logger.warning(f"⚠️  PROFIT_ORDER_ID non trouvé dans orderReports !")
                     if not stop_order_id:
-                        self.logger.warning(f"⚠️  STOP_ORDER_ID non trouvé dans la réponse OCO !")
+                        self.logger.warning(f"⚠️  STOP_ORDER_ID non trouvé dans orderReports !")
                     
                     # 🔥 INSERTION EN BASE BULLETPROOF
                     try:
