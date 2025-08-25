@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+
+{% block title %}Transactions - Enhanced Trading Bot{% endblock %}
+
+{% block content %}
+<div class="transactions-container">
+    <div class="transactions-header">
+        <h1>📈 Transactions</h1>
+        <div class="last-update">
+            Dernière mise à jour: <span id="last-update-time">--</span>
+            <button class="refresh-btn" onclick="window.refreshTransactions()" title="Actualiser">
+                🔄 Actualiser
+            </button>
+        </div>
+    </div>
+
+    <!-- Filtres de période -->
+    <div class="period-filters">
+        <button class="period-btn active" data-period="today">Aujourd'hui</button>
+        <button class="period-btn" data-period="week">7 jours</button>
+        <button class="period-btn" data-period="month">30 jours</button>
+        <button class="period-btn" data-period="all">Tout</button>
+    </div>
+
+    <!-- Résumé des transactions -->
+    <div class="transactions-summary">
+        <div class="summary-card">
+            <div class="summary-icon">📈</div>
+            <div class="summary-value" id="total-buys">--</div>
+            <div class="summary-label">Total achats</div>
+        </div>
+
+        <div class="summary-card">
+            <div class="summary-icon">📉</div>
+            <div class="summary-value" id="total-sells">--</div>
+            <div class="summary-label">Total ventes</div>
+        </div>
+
+        <div class="summary-card">
+            <div class="summary-icon">💰</div>
+            <div class="summary-value" id="total-volume">--</div>
+            <div class="summary-label">Volume total USDC</div>
+        </div>
+
+        <div class="summary-card">
+            <div class="summary-icon">📊</div>
+            <div class="summary-value" id="avg-trade-size">--</div>
+            <div class="summary-label">Taille moy. trade</div>
+        </div>
+    </div>
+
+    <!-- Graphique des transactions -->
+    <div class="dashboard-section">
+        <h2>📊 Volume des transactions</h2>
+        <div id="transactions-chart-loader" class="loading" style="display:none;">Chargement du graphique...</div>
+        <div class="chart-container">
+            <canvas id="transactions-volume-chart" width="600" height="300"></canvas>
+        </div>
+    </div>
+
+    <!-- Tableau des transactions -->
+    <div class="dashboard-section">
+        <h2>📋 Détail des transactions</h2>
+        <div id="transactions-list-loader" class="loading" style="display:none;">Chargement des transactions...</div>
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Date/Heure</th>
+                        <th>Order ID</th>
+                        <th>Symbole</th>
+                        <th>Type</th>
+                        <th>Prix</th>
+                        <th>Quantité</th>
+                        <th>Valeur USDC</th>
+                        <th>Commission</th>
+                        <th>Statut</th>
+                    </tr>
+                </thead>
+                <tbody id="transactions-table">
+                    <tr>
+                        <td colspan="9" class="loading">Chargement des transactions...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Statistiques détaillées -->
+    <div class="dashboard-grid">
+        <div class="dashboard-section">
+            <h2>📊 Répartition par crypto</h2>
+            <div id="crypto-stats-loader" class="loading" style="display:none;">Calcul des statistiques...</div>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Symbole</th>
+                            <th>Nb achats</th>
+                            <th>Nb ventes</th>
+                            <th>Volume total</th>
+                            <th>Dernière transaction</th>
+                        </tr>
+                    </thead>
+                    <tbody id="crypto-stats-table">
+                        <tr>
+                            <td colspan="5" class="loading">Calcul des statistiques...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="dashboard-section">
+            <h2>📈 Métriques de performance</h2>
+            <div class="performance-metrics">
+                <div class="metric-item">
+                    <div class="metric-label">Fréquence de trading</div>
+                    <div class="metric-value" id="trade-frequency">-- trades/jour</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Commission totale</div>
+                    <div class="metric-value" id="total-commission">-- USDC</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Plus gros trade</div>
+                    <div class="metric-value" id="biggest-trade">-- USDC</div>
+                </div>
+                <div class="metric-item">
+                    <div class="metric-label">Répartition achat/vente</div>
+                    <div class="metric-value" id="buy-sell-ratio">--% / --%</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="{{ url_for('static', filename='js/transactions.js') }}?v=2025"></script>
+{% endblock %}

@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Enhanced Trading Bot{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <div class="page-header">
+        <h1>📊 Dashboard Trading Bot</h1>
+        <div class="last-update">
+            Dernière mise à jour: <span id="last-update-time">--</span>
+            <button class="refresh-btn" onclick="window.refreshDashboard()" title="Actualiser">
+                🔄
+            </button>
+        </div>
+    </div>
+
+    <!-- Stats Summary -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-icon">💰</div>
+            <div class="stat-content">
+                <div class="stat-value" id="daily-buys-count">--</div>
+                <div class="stat-label">Achats aujourd'hui</div>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon">🎯</div>
+            <div class="stat-content">
+                <div class="stat-value" id="active-oco-count">--</div>
+                <div class="stat-label">Ordres OCO actifs</div>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon">📊</div>
+            <div class="stat-content">
+                <div class="stat-value" id="total-transactions-count">--</div>
+                <div class="stat-label">Total transactions</div>
+            </div>
+        </div>
+
+        <div class="stat-card status-card">
+            <div class="stat-icon">🔄</div>
+            <div class="stat-content">
+                <div class="stat-value bot-status" id="bot-status-text">--</div>
+                <div class="stat-label">Statut du bot</div>
+                <div class="status-help">
+                    🟢 Actif: trading récent<br>
+                    🟡 Inactif: pas de trades<br>
+                    🔴 Erreur: problème détecté
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Content Grid -->
+    <div class="dashboard-grid">
+        <!-- Recent Transactions -->
+        <div class="dashboard-section">
+            <h2>📈 Activités récentes</h2>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Date/Heure</th>
+                            <th>Crypto</th>
+                            <th>Type</th>
+                            <th>Quantité</th>
+                            <th>Valeur</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recent-transactions-table">
+                        <tr>
+                            <td colspan="5" class="loading">Chargement des transactions...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Active OCO Orders -->
+        <div class="dashboard-section">
+            <h2>🎯 Ordres OCO actifs</h2>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Date/Heure</th>
+                            <th>Crypto</th>
+                            <th>Quantité</th>
+                            <th>Profit cible</th>
+                            <th>Statut</th>
+                        </tr>
+                    </thead>
+                    <tbody id="active-orders-table">
+                        <tr>
+                            <td colspan="5" class="loading">Chargement des ordres...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/dashboard-main.js') }}?v=2025"></script>
+{% endblock %}
