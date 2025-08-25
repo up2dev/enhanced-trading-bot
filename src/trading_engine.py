@@ -837,13 +837,14 @@ class TradingEngine:
             
             # 2. 🔥 CRÉER LA TRANSACTION DE VENTE (BULLETPROOF)
             try:
-                # Vérifier si la transaction existe déjà - MÉTHODE SQL DIRECTE
-                cursor = self.database.conn.execute(
-                    "SELECT id FROM transactions WHERE order_id = ? AND order_side = 'SELL'",
-                    (order_id,)
-                )
-                existing_tx = cursor.fetchone()
-                
+                # Vérifier si la transaction existe déjà - UTILISER LE CONTEXT MANAGER
+                with self.database.get_connection() as conn:
+                    cursor = conn.execute(
+                        "SELECT id FROM transactions WHERE order_id = ? AND order_side = 'SELL'",
+                        (order_id,)
+                    )
+                    existing_tx = cursor.fetchone()
+
                 if existing_tx:
                     self.logger.debug(f"   ✅ Transaction vente déjà existante (ID: {existing_tx[0]})")
                 else:
