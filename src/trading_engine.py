@@ -847,11 +847,12 @@ class TradingEngine:
                 if existing_tx:
                     self.logger.debug(f"   ✅ Transaction vente déjà existante (ID: {existing_tx[0]})")
                 else:
+                    order_time = executed_order.get('updateTime') or executed_order.get('time') or int(time.time() * 1000)
                     # Créer la transaction de vente
                     self.database.insert_transaction(
                         symbol=symbol,
                         order_id=order_id,
-                        transact_time=str(executed_order.get('time', int(time.time() * 1000))),
+                        transact_time=str(order_time),
                         order_type=executed_order.get('type', 'LIMIT'),
                         order_side='SELL',  # 🎯 CRUCIAL : C'est une VENTE !
                         price=exec_price,
