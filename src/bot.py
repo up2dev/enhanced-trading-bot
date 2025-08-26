@@ -108,6 +108,7 @@ class EnhancedTradingBot:
             # 🔍 SURVEILLANCE DES ORDRES OCO (AVANT le trading)
             if not self.dry_run:  # Pas en simulation
                 self.trading_engine.monitor_oco_orders()
+                # 🔍 SURVEILLANCE DES ORDRES LIMITES (AVANT le trading)
                 self.trading_engine.monitor_limit_orders()
             
             # Vérification des positions existantes
