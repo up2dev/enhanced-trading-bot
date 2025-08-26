@@ -393,28 +393,68 @@ class DatabaseManager:
             self.logger.error(f"❌ Erreur update LIMIT: {e}")
 
     def get_order_commissions_from_binance(self, binance_client, symbol: str, order_id: str) -> tuple:
-        """Récupère les commissions réelles depuis Binance"""
+        """Récupère les commissions réelles depuis Binance - VERSION CORRIGÉE"""
         try:
-            order_details = binance_client._make_request_with_retry(
-                binance_client.client.get_order,
-                symbol=symbol,
-                orderId=int(order_id)
-            )
-            
-            if 'fills' in order_details and order_details['fills']:
-                total_commission = 0.0
-                commission_asset = 'USDC'
+            # 1. ESSAYER D'ABORD get_order (pour les ordres récents)
+            try:
+                order_details = binance_client._make_request_with_retry(
+                    binance_client.client.get_order,
+                    symbol=symbol,
+                    orderId=int(order_id)
+                )
                 
-                for fill in order_details['fills']:
-                    fill_commission = float(fill.get('commission', 0.0))
-                    fill_asset = fill.get('commissionAsset', 'USDC')
+                if 'fills' in order_details and order_details['fills']:
+                    total_commission = 0.0
+                    commission_asset = 'USDC'
                     
-                    # Simple : garder la commission dans son asset original
-                    total_commission += fill_commission
-                    commission_asset = fill_asset
-                
-                return total_commission, commission_asset
+                    for fill in order_details['fills']:
+                        fill_commission = float(fill.get('commission', 0.0))
+                        fill_asset = fill.get('commissionAsset', 'USDC')
+                        
+                        # Simple : garder la commission dans son asset original
+                        total_commission += fill_commission
+                        commission_asset = fill_asset
+                    
+                    if total_commission > 0:
+                        self.logger.debug(f"✅ Commissions via get_order: {total_commission} {commission_asset}")
+                        return total_commission, commission_asset
+                    else:
+                        self.logger.debug(f"⚠️ get_order: fills présents mais commissions = 0")
+                else:
+                    self.logger.debug(f"⚠️ get_order: pas de fills, essai get_my_trades")
             
+            except Exception as order_error:
+                self.logger.debug(f"⚠️ get_order échoué: {order_error}")
+            
+            # 2. 🔥 FALLBACK: get_my_trades (pour ordres anciens ou sans fills)
+            try:
+                trades = binance_client._make_request_with_retry(
+                    binance_client.client.get_my_trades,
+                    symbol=symbol,
+                    orderId=int(order_id)
+                )
+                
+                if trades:
+                    total_commission = 0.0
+                    commission_asset = 'USDC'
+                    
+                    for trade in trades:
+                        trade_commission = float(trade.get('commission', 0.0))
+                        trade_asset = trade.get('commissionAsset', 'USDC')
+                        
+                        total_commission += trade_commission
+                        commission_asset = trade_asset  # Garde le dernier
+                    
+                    self.logger.debug(f"✅ Commissions via get_my_trades: {total_commission} {commission_asset}")
+                    return total_commission, commission_asset
+                else:
+                    self.logger.warning(f"⚠️ Aucun trade trouvé pour ordre {order_id}")
+            
+            except Exception as trades_error:
+                self.logger.warning(f"⚠️ get_my_trades échoué: {trades_error}")
+            
+            # 3. FALLBACK FINAL: Estimation
+            self.logger.warning(f"⚠️ Impossible de récupérer commissions, utilisation estimation")
             return 0.0, 'USDC'
             
         except Exception as e:
