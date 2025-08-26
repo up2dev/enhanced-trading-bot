@@ -286,7 +286,7 @@ class TradingBotMailer:
                     
                     <div class="footer">
                         📧 Email automatique hebdomadaire du système Enhanced Trading Bot<br>
-                        🗓️ Prochain rapport: {datetime.now().replace(day=datetime.now().day+7).strftime('%d/%m/%Y')}
+                        🗓️ Prochain rapport: {(datetime.now() + timedelta(days=7)).strftime('%d/%m/%Y')}
                     </div>
                 </div>
             </body>

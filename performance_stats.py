@@ -139,76 +139,76 @@ class PerformanceAnalyzer:
             unique_symbols = 0
         
         # 2. CALCULER LA VALEUR DES CRYPTOS MISES DE CÔTÉ (OCO + LIMIT)
-            print("🔍 Calcul de la valeur des cryptos mises de côté...")
-            
-            # 🔄 CORRECTION: Récupérer depuis OCO ET LIMIT
-            cursor = self.conn.execute("""
-                SELECT 
-                    symbol,
-                    COALESCE(SUM(kept_quantity), 0) as total_kept,
-                    'OCO' as source
-                FROM oco_orders 
-                WHERE kept_quantity > 0 
-                AND created_at >= ?
-                GROUP BY symbol
-                
-                UNION ALL
-                
-                SELECT 
-                    symbol,
-                    COALESCE(SUM(kept_quantity), 0) as total_kept,
-                    'LIMIT' as source
-                FROM limit_orders 
-                WHERE kept_quantity > 0 
-                AND created_at >= ?
-                GROUP BY symbol
-            """, [date_filter.strftime('%Y-%m-%d'), date_filter.strftime('%Y-%m-%d')])
-            
-            kept_cryptos = cursor.fetchall()
-            total_holdings_value = 0.0
-            
-            if kept_cryptos:
-                print("\n💎 Cryptos mises de côté:")
-                
-                # Grouper par symbol pour éviter les doublons
-                crypto_holdings = {}
-                
-                for crypto in kept_cryptos:
-                    try:
-                        symbol = self.safe_row_access(crypto, 'symbol', 'UNKNOWN')
-                        kept_qty = self._safe_float(self.safe_row_access(crypto, 'total_kept', 0))
-                        source = self.safe_row_access(crypto, 'source', 'UNKNOWN')
-                        
-                        if symbol not in crypto_holdings:
-                            crypto_holdings[symbol] = {'qty': 0, 'sources': []}
-                        
-                        crypto_holdings[symbol]['qty'] += kept_qty
-                        crypto_holdings[symbol]['sources'].append(source)
-                        
-                    except (KeyError, IndexError, TypeError):
-                        continue
-                
-                for symbol, data in crypto_holdings.items():
-                    kept_qty = data['qty']
-                    sources = ', '.join(set(data['sources']))
-                    
-                    if kept_qty > 0:
-                        # Récupérer le dernier prix connu
-                        cursor = self.conn.execute("""
-                            SELECT price FROM transactions 
-                            WHERE symbol = ? 
-                            ORDER BY created_at DESC 
-                            LIMIT 1
-                        """, [symbol])
-                        
-                        last_price_row = cursor.fetchone()
-                        last_price = self._safe_float(last_price_row[0]) if last_price_row else 0
-                        
-                        holding_value = kept_qty * last_price
-                        total_holdings_value += holding_value
-                        
-                        print(f"   {symbol}: {kept_qty:.8f} @ {last_price:.6f} = {holding_value:.2f} USDC ({sources})")
+        print("🔍 Calcul de la valeur des cryptos mises de côté...")
         
+        # 🔄 CORRECTION: Récupérer depuis OCO ET LIMIT
+        cursor = self.conn.execute("""
+            SELECT 
+                symbol,
+                COALESCE(SUM(kept_quantity), 0) as total_kept,
+                'OCO' as source
+            FROM oco_orders 
+            WHERE kept_quantity > 0 
+            AND created_at >= ?
+            GROUP BY symbol
+            
+            UNION ALL
+            
+            SELECT 
+                symbol,
+                COALESCE(SUM(kept_quantity), 0) as total_kept,
+                'LIMIT' as source
+            FROM limit_orders 
+            WHERE kept_quantity > 0 
+            AND created_at >= ?
+            GROUP BY symbol
+        """, [date_filter.strftime('%Y-%m-%d'), date_filter.strftime('%Y-%m-%d')])
+        
+        kept_cryptos = cursor.fetchall()
+        total_holdings_value = 0.0
+        
+        if kept_cryptos:
+            print("\n💎 Cryptos mises de côté:")
+            
+            # Grouper par symbol pour éviter les doublons
+            crypto_holdings = {}
+            
+            for crypto in kept_cryptos:
+                try:
+                    symbol = self.safe_row_access(crypto, 'symbol', 'UNKNOWN')
+                    kept_qty = self._safe_float(self.safe_row_access(crypto, 'total_kept', 0))
+                    source = self.safe_row_access(crypto, 'source', 'UNKNOWN')
+                    
+                    if symbol not in crypto_holdings:
+                        crypto_holdings[symbol] = {'qty': 0, 'sources': []}
+                    
+                    crypto_holdings[symbol]['qty'] += kept_qty
+                    crypto_holdings[symbol]['sources'].append(source)
+                    
+                except (KeyError, IndexError, TypeError):
+                    continue
+            
+            for symbol, data in crypto_holdings.items():
+                kept_qty = data['qty']
+                sources = ', '.join(set(data['sources']))
+                
+                if kept_qty > 0:
+                    # Récupérer le dernier prix connu
+                    cursor = self.conn.execute("""
+                        SELECT price FROM transactions 
+                        WHERE symbol = ? 
+                        ORDER BY created_at DESC 
+                        LIMIT 1
+                    """, [symbol])
+                    
+                    last_price_row = cursor.fetchone()
+                    last_price = self._safe_float(last_price_row[0]) if last_price_row else 0
+                    
+                    holding_value = kept_qty * last_price
+                    total_holdings_value += holding_value
+                    
+                    print(f"   {symbol}: {kept_qty:.8f} @ {last_price:.6f} = {holding_value:.2f} USDC ({sources})")
+    
         # 3. CALCUL CORRIGÉ DU PROFIT
         net_profit_basic = total_sold - total_invested - total_fees
         net_profit_with_holdings = net_profit_basic + total_holdings_value
