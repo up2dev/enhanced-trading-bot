@@ -492,7 +492,7 @@ class TradingEngine:
             return {'success': False, 'error': str(e)}
 
     def execute_sell_order_with_stop_loss(self, symbol: str, bought_quantity: float, buy_price: float, profit_target: float, buy_transaction_id: int = None) -> Dict:
-        """Exécute un ordre OCO avec profit + stop-loss + INSERTION EN BASE BULLETPROOF"""
+        """Exécute un ordre OCO avec profit + stop-loss + INSERTION EN BASE BULLETPROOF + VENTE MARKET D'URGENCE"""
         try:
             # Configuration des ordres
             hold = self.advanced_config.get('hold', True)
@@ -620,7 +620,7 @@ class TradingEngine:
             self.logger.debug(f"   Step size: {step_size} -> Qty précision: {qty_precision}")
             self.logger.debug(f"   Quantité finale: {sell_quantity:.{qty_precision}f}")
             
-            self.logger.info(f"🔄 Future transfer: {'Activé' if hold else 'Désactivé'}")
+            self.logger.info(f"🔄 Hold strategy: {'Activé' if hold else 'Désactivé'}")
             if hold:
                 self.logger.info(f"   📦 Quantité achetée: {bought_quantity:.8f}")
                 self.logger.info(f"   🏪 Quantité à vendre: {sell_quantity:.8f} ({(sell_quantity/bought_quantity)*100:.1f}%)")
@@ -763,46 +763,152 @@ class TradingEngine:
             
             if not use_oco_orders:
                 # Ordre limite classique (fallback)
-                limit_order = self.binance_client._make_request_with_retry(
-                    self.binance_client.client.order_limit_sell,
-                    symbol=symbol,
-                    quantity=sell_quantity,
-                    price=f"{target_price:.{price_precision}f}",
-                    timeInForce='GTC'
-                )
-                
-                self.logger.info(f"✅ ORDRE LIMITE PLACÉ {symbol}")
-                self.logger.info(f"   📈 ID: {limit_order['orderId']}")
-                self.logger.warning(f"⚠️  Pas de protection stop-loss (ordre limite simple)")
-                
-                # 🆕 ENREGISTRER EN BASE
                 try:
-                    limit_db_id = self.database.insert_limit_order(
+                    limit_order = self.binance_client._make_request_with_retry(
+                        self.binance_client.client.order_limit_sell,
                         symbol=symbol,
-                        order_id=str(limit_order['orderId']),
-                        buy_transaction_id=buy_transaction_id or 0,
-                        profit_target=profit_target,
-                        target_price=target_price,
                         quantity=sell_quantity,
-                        kept_quantity=kept_quantity
+                        price=f"{target_price:.{price_precision}f}",
+                        timeInForce='GTC'
                     )
                     
-                    self.logger.info(f"💾 Ordre LIMIT enregistré en base (DB ID: {limit_db_id})")
+                    self.logger.info(f"✅ ORDRE LIMITE PLACÉ {symbol}")
+                    self.logger.info(f"   📈 ID: {limit_order['orderId']}")
+                    self.logger.warning(f"⚠️  Pas de protection stop-loss (ordre limite simple)")
                     
-                except Exception as db_error:
-                    self.logger.error(f"❌ Erreur insertion LIMIT en base: {db_error}")
-                    limit_db_id = None
+                    # 🆕 ENREGISTRER EN BASE
+                    try:
+                        limit_db_id = self.database.insert_limit_order(
+                            symbol=symbol,
+                            order_id=str(limit_order['orderId']),
+                            buy_transaction_id=buy_transaction_id or 0,
+                            profit_target=profit_target,
+                            target_price=target_price,
+                            quantity=sell_quantity,
+                            kept_quantity=kept_quantity
+                        )
+                        
+                        self.logger.info(f"💾 Ordre LIMIT enregistré en base (DB ID: {limit_db_id})")
+                        
+                    except Exception as db_error:
+                        self.logger.error(f"❌ Erreur insertion LIMIT en base: {db_error}")
+                        limit_db_id = None
+                    
+                    return {
+                        'success': True,
+                        'order_type': 'LIMIT',
+                        'order': limit_order,
+                        'target_price': target_price,
+                        'quantity': sell_quantity,
+                        'kept_quantity': kept_quantity,
+                        'limit_db_id': limit_db_id,
+                        'simulation': False
+                    }
                 
-                return {
-                    'success': True,
-                    'order_type': 'LIMIT',
-                    'order': limit_order,
-                    'target_price': target_price,
-                    'quantity': sell_quantity,
-                    'kept_quantity': kept_quantity,
-                    'limit_db_id': limit_db_id,
-                    'simulation': False
-                }
+                except Exception as limit_error:
+                    # 🚨 DERNIER RECOURS : VENTE MARKET IMMÉDIATE
+                    self.logger.error(f"❌ Échec ordre LIMIT {symbol}: {limit_error}")
+                    
+                    # Vérifier si c'est une erreur de limite d'ordres
+                    if "MAX_NUM_ORDERS" in str(limit_error) or "filter failure" in str(limit_error).lower():
+                        self.logger.critical(f"🚨 LIMITE ORDRES ATTEINTE pour {symbol} - VENTE MARKET D'URGENCE!")
+                        
+                        try:
+                            # 🔥 CORRECTION: Vendre TOUTE la quantité achetée
+                            emergency_sell_quantity = bought_quantity  # ✅ PAS sell_quantity !
+                            
+                            # Respecter les filtres LOT_SIZE pour la vente complète
+                            symbol_info = self.binance_client._make_request_with_retry(
+                                self.binance_client.client.get_symbol_info,
+                                symbol=symbol
+                            )
+                            
+                            lot_size_filter = next(f for f in symbol_info['filters'] if f['filterType'] == 'LOT_SIZE')
+                            step_size = float(lot_size_filter['stepSize'])
+                            
+                            # Arrondir la quantité totale selon step_size
+                            qty_precision = max(0, -int(np.log10(step_size)))
+                            emergency_sell_quantity = round(emergency_sell_quantity / step_size) * step_size
+                            emergency_sell_quantity = round(emergency_sell_quantity, qty_precision)
+                            
+                            self.logger.warning(f"⚡ VENTE MARKET D'URGENCE:")
+                            self.logger.warning(f"   📦 Quantité achetée: {bought_quantity:.8f}")
+                            self.logger.warning(f"   🏪 Quantité à vendre: {emergency_sell_quantity:.8f}")
+                            self.logger.warning(f"   ⚠️  Mode: RÉCUPÉRATION COMPLÈTE (pas hold strategy)")
+                            
+                            # VENTE MARKET IMMÉDIATE de TOUT
+                            market_order = self.binance_client._make_request_with_retry(
+                                self.binance_client.client.order_market_sell,
+                                symbol=symbol,
+                                quantity=emergency_sell_quantity
+                            )
+                            
+                            # Prix estimé pour les calculs
+                            ticker = self.binance_client._make_request_with_retry(
+                                self.binance_client.client.get_symbol_ticker,
+                                symbol=symbol
+                            )
+                            market_price = float(ticker['price'])
+                            executed_qty = float(market_order.get('executedQty', emergency_sell_quantity))
+                            
+                            self.logger.warning(f"✅ VENTE MARKET RÉALISÉE {symbol}:")
+                            self.logger.warning(f"   💸 Prix market: {market_price:.6f} USDC")
+                            self.logger.warning(f"   📊 Quantité vendue: {executed_qty:.8f}")
+                            self.logger.warning(f"   💰 Valeur récupérée: {market_price * executed_qty:.2f} USDC")
+                            self.logger.warning(f"   💎 Crypto gardée: 0 (vente complète d'urgence)")
+                            
+                            # Récupérer commissions réelles
+                            try:
+                                commission, commission_asset = self.database.get_order_commissions_from_binance(
+                                    self.binance_client, symbol, str(market_order['orderId'])
+                                )
+                            except:
+                                commission = market_price * executed_qty * 0.001  # Estimation
+                                commission_asset = 'USDC'
+                            
+                            # Enregistrer la transaction de vente market
+                            self.database.insert_transaction(
+                                symbol=symbol,
+                                order_id=str(market_order['orderId']),
+                                transact_time=str(market_order.get('transactTime', int(time.time() * 1000))),
+                                order_type='MARKET',
+                                order_side='SELL',
+                                price=market_price,
+                                qty=executed_qty,
+                                commission=commission,
+                                commission_asset=commission_asset
+                            )
+                            
+                            self.logger.warning(f"📝 Transaction VENTE MARKET COMPLÈTE enregistrée")
+                            
+                            return {
+                                'success': True,
+                                'order_type': 'MARKET_EMERGENCY',
+                                'order': market_order,
+                                'target_price': market_price,  # Prix réel obtenu
+                                'quantity': executed_qty,      # Quantité réellement vendue
+                                'kept_quantity': 0.0,          # 🔥 AUCUNE crypto gardée en urgence
+                                'emergency_sale': True,
+                                'simulation': False,
+                                'warning': 'Vente market d\'urgence complète - limites ordres atteintes'
+                            }
+                            
+                        except Exception as market_error:
+                            self.logger.critical(f"🚨 ÉCHEC VENTE MARKET {symbol}: {market_error}")
+                            self.logger.critical(f"💀 CRYPTO ACHETÉE MAIS NON VENDUE - INTERVENTION MANUELLE REQUISE!")
+                            self.logger.critical(f"📦 Quantité non vendue: {bought_quantity:.8f} {symbol.replace('USDC', '')}")
+                            
+                            return {
+                                'success': False,
+                                'error': f'Échec complet vente {symbol}: OCO/LIMIT/MARKET tous échoués',
+                                'critical': True,
+                                'manual_intervention_required': True,
+                                'bought_quantity': bought_quantity,
+                                'symbol': symbol
+                            }
+                    else:
+                        # Autre type d'erreur LIMIT, la relancer
+                        raise limit_error
             
         except Exception as e:
             self.logger.error(f"❌ Erreur ordre {symbol}: {e}")
