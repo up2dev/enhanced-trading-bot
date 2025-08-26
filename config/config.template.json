@@ -15,7 +15,7 @@
         "second_rsi_rate": 30
     },
     "risk_management": {
-        "max_positions_per_crypto": 30,
+        "max_positions_per_crypto": 25,
         "cooldown_minutes": 30,
         "max_daily_trades": 100,
         "stop_loss_percentage": -8.0,
@@ -23,7 +23,7 @@
         "stop_limit_buffer": 0.001
     },
     "advanced_strategy": {
-        "future_transfer_enabled": true
+        "hold": true
     },
     "cryptos": {
         "BTC": {

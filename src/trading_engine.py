@@ -42,6 +42,34 @@ class TradingEngine:
         self.logger.info(f"⚙️  TradingEngine initialisé en mode {mode_text}")
         self.logger.info(f"🛡️  Sécurités: {self.max_positions_per_crypto} positions/crypto, {cooldown_minutes}min cooldown, {self.max_daily_buys_global} achats/jour max")
 
+    def can_place_oco_order(self, symbol: str) -> bool:
+        """Vérifie si on peut placer un OCO sur ce SYMBOL (limite 5 par symbol)"""
+        try:
+            # Récupérer ordres ouverts POUR CE SYMBOL uniquement
+            open_orders = self.binance_client._make_request_with_retry(
+                self.binance_client.client.get_open_orders,
+                symbol=symbol  # 🔥 CRUCIAL: par symbol !
+            )
+            
+            # Compter les OCO sur ce symbol
+            oco_ids = set()
+            for order in open_orders:
+                if order.get('orderListId', -1) != -1:
+                    oco_ids.add(order['orderListId'])
+            
+            oco_count = len(oco_ids)
+            
+            if oco_count >= 5:
+                self.logger.warning(f"🚫 Limite OCO {symbol}: {oco_count}/5")
+                return False
+            
+            self.logger.debug(f"✅ OCO {symbol}: {oco_count}/5 (slot disponible)")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"❌ Erreur vérification OCO {symbol}: {e}")
+            return False  # Sécuritaire
+        
     def find_digit_position(self, num: float, digit: str = '1') -> int:
         """Trouve la position d'un chiffre dans la partie décimale (logique legacy)"""
         try:
@@ -239,7 +267,7 @@ class TradingEngine:
         return self.database.get_daily_buy_count()
     
     def log_trading_stats(self):
-        """Log les statistiques de trading avec OCO"""
+        """Log les statistiques de trading avec OCO par symbol"""
         try:
             # Stats rapides depuis la DB
             stats = self.database.get_quick_stats()
@@ -248,33 +276,53 @@ class TradingEngine:
             
             self.logger.info("📊 === STATISTIQUES DE TRADING ===")
             self.logger.info(f"🌍 Achats aujourd'hui: {daily_buys}/{self.max_daily_buys_global} ({self.max_daily_buys_global - daily_buys} restants)")
-            self.logger.info(f"🎯 Ordres OCO actifs: {active_oco}")
+            self.logger.info(f"🎯 Ordres OCO actifs (total): {active_oco}")
             
-            # Positions par crypto via Binance API
-            active_cryptos = self.config.get('cryptos', {})
-            total_positions = 0
-            
-            for name, crypto_config in active_cryptos.items():
-                if not crypto_config.get('active', False):
-                    continue
+            # 🆕 OCO par symbol surveillé
+            try:
+                all_orders = self.binance_client._make_request_with_retry(
+                    self.binance_client.client.get_open_orders
+                )
                 
-                symbol = crypto_config.get('symbol')
-                if symbol:
-                    positions = self._count_active_positions(symbol)
-                    if positions > 0:
-                        self.logger.info(f"📈 {symbol}: {positions}/{self.max_positions_per_crypto} positions actives")
-                        total_positions += positions
-            
-            if total_positions == 0:
-                self.logger.info("✅ Aucune position active actuellement")
-            else:
-                self.logger.info(f"📊 Total positions API: {total_positions}")
+                oco_by_symbol = {}
+                for order in all_orders:
+                    if order.get('orderListId', -1) != -1:
+                        symbol = order['symbol']
+                        if symbol not in oco_by_symbol:
+                            oco_by_symbol[symbol] = set()
+                        oco_by_symbol[symbol].add(order['orderListId'])
+                
+                # Afficher OCO par symbol surveillé
+                active_cryptos = self.config.get('cryptos', {})
+                at_limit_count = 0
+                
+                for name, crypto_config in active_cryptos.items():
+                    if not crypto_config.get('active', False):
+                        continue
+                    
+                    symbol = crypto_config.get('symbol')
+                    if symbol:
+                        oco_count = len(oco_by_symbol.get(symbol, set()))
+                        positions = self._count_active_positions(symbol)
+                        
+                        if oco_count > 0 or positions > 0:
+                            status = "🚫" if oco_count >= 5 else "✅"
+                            self.logger.info(f"{status} {symbol}: {oco_count}/5 OCO, {positions} positions totales")
+                            
+                            if oco_count >= 5:
+                                at_limit_count += 1
+                
+                if at_limit_count > 0:
+                    self.logger.warning(f"⚠️  {at_limit_count} symbol(s) à la limite OCO")
+                
+            except Exception as stats_error:
+                self.logger.debug(f"Erreur stats détaillées: {stats_error}")
                 
             self.logger.info("=" * 40)
             
         except Exception as e:
             self.logger.error(f"❌ Erreur log statistiques: {e}")
-    
+            
     def execute_buy_order(self, symbol: str, usdc_amount: float) -> Dict:
         """Exécute un ordre d'achat avec gestion COMPLÈTE des fills multiples"""
         try:
@@ -447,12 +495,12 @@ class TradingEngine:
         """Exécute un ordre OCO avec profit + stop-loss + INSERTION EN BASE BULLETPROOF"""
         try:
             # Configuration des ordres
-            future_transfer_enabled = self.advanced_config.get('future_transfer_enabled', True)
+            hold = self.advanced_config.get('hold', True)
             use_oco_orders = self.risk_config.get('use_oco_orders', True)
             stop_loss_percentage = self.risk_config.get('stop_loss_percentage', -8.0)
             
             # 🔥 CORRECTION COMPLÈTE: Logique "récupérer investissement initial"
-            if future_transfer_enabled:
+            if hold:
                 # Prix de vente cible
                 target_price = self.calculate_sell_price_limit(buy_price, profit_target)
 
@@ -572,8 +620,8 @@ class TradingEngine:
             self.logger.debug(f"   Step size: {step_size} -> Qty précision: {qty_precision}")
             self.logger.debug(f"   Quantité finale: {sell_quantity:.{qty_precision}f}")
             
-            self.logger.info(f"🔄 Future transfer: {'Activé' if future_transfer_enabled else 'Désactivé'}")
-            if future_transfer_enabled:
+            self.logger.info(f"🔄 Future transfer: {'Activé' if hold else 'Désactivé'}")
+            if hold:
                 self.logger.info(f"   📦 Quantité achetée: {bought_quantity:.8f}")
                 self.logger.info(f"   🏪 Quantité à vendre: {sell_quantity:.8f} ({(sell_quantity/bought_quantity)*100:.1f}%)")
                 self.logger.info(f"   💎 Quantité gardée: {kept_quantity:.8f} ({(kept_quantity/bought_quantity)*100:.1f}%)")
@@ -596,117 +644,122 @@ class TradingEngine:
             
             # ORDRE OCO RÉEL avec insertion en base
             if use_oco_orders:
-                try:
-                    oco_order = self.binance_client._make_request_with_retry(
-                        self.binance_client.client.create_oco_order,
-                        symbol=symbol,
-                        side='SELL',
-                        quantity=sell_quantity,
-                        price=f"{target_price:.{price_precision}f}",
-                        stopPrice=f"{stop_price:.{price_precision}f}",
-                        stopLimitPrice=f"{stop_limit_price:.{price_precision}f}",
-                        stopLimitTimeInForce='GTC'
-                    )
-                    
-                    self.logger.info(f"✅ ORDRE OCO PLACÉ {symbol}")
-                    
-                    # 🔥 EXTRACTION IDS BULLETPROOF - UTILISER orderReports !
-                    profit_order_id = None
-                    stop_order_id = None
-                    oco_order_list_id = oco_order.get('orderListId', '')
-                    
-                    self.logger.debug(f"🔍 OCO Response: orderListId={oco_order_list_id}")
-                    
-                    # 🎯 CLEF DU SUCCÈS: orderReports contient les types !
-                    order_reports = oco_order.get('orderReports', [])
-                    self.logger.debug(f"🔍 OrderReports in OCO: {len(order_reports)}")
-                    
-                    if not order_reports:
-                        self.logger.error(f"❌ Pas d'orderReports dans la réponse OCO!")
-                        # Log de debug complet
-                        import json
-                        self.logger.error(f"Réponse OCO complète: {json.dumps(oco_order, indent=2)}")
-                    
-                    for i, order in enumerate(order_reports):
-                        order_id = order.get('orderId')
-                        order_type = order.get('type')
-                        order_side = order.get('side', '')
-                        order_price = order.get('price', 'N/A')
-                        stop_price_field = order.get('stopPrice', 'N/A')
-                        
-                        self.logger.info(f"  OrderReport {i+1}: ID={order_id}, Type={order_type}, Side={order_side}")
-                        self.logger.debug(f"    Price={order_price}, StopPrice={stop_price_field}")
-                        
-                        # ✅ LOGIQUE EXACTE BASÉE SUR VOTRE TEST RÉUSSI
-                        if order_type == 'LIMIT_MAKER':
-                            profit_order_id = order_id
-                            self.logger.info(f"   📈 Profit Order: {profit_order_id}")
-                        elif order_type == 'STOP_LOSS_LIMIT':
-                            stop_order_id = order_id 
-                            self.logger.info(f"   🛡️ Stop Order: {stop_order_id}")
-                        else:
-                            self.logger.warning(f"   ❓ Type inconnu: {order_type}")
-                    
-                    # Vérification finale avec logs détaillés
-                    self.logger.info(f"🎯 === RÉSULTAT EXTRACTION IDs ===")
-                    self.logger.info(f"Profit Order ID: {profit_order_id}")
-                    self.logger.info(f"Stop Order ID: {stop_order_id}")
-                    
-                    if profit_order_id and stop_order_id:
-                        self.logger.info(f"✅ EXTRACTION RÉUSSIE - 2 IDs récupérés")
-                    elif profit_order_id or stop_order_id:
-                        self.logger.warning(f"⚠️ EXTRACTION PARTIELLE - 1 seul ID récupéré")
-                    else:
-                        self.logger.error(f"❌ EXTRACTION ÉCHOUÉE - Aucun ID récupéré")
-                    
-                    # 🔥 INSERTION EN BASE BULLETPROOF
+                # 🔥 NOUVEAU: Vérifier limite OCO pour ce symbol
+                if not self.can_place_oco_order(symbol):
+                    self.logger.warning(f"🚫 Limite OCO atteinte pour {symbol}, fallback LIMIT")
+                    use_oco_orders = False
+                else:
                     try:
-                        oco_db_id = self.database.insert_oco_order(
+                        oco_order = self.binance_client._make_request_with_retry(
+                            self.binance_client.client.create_oco_order,
                             symbol=symbol,
-                            oco_order_id=str(oco_order_list_id),
-                            profit_order_id=str(profit_order_id) if profit_order_id else '',
-                            stop_order_id=str(stop_order_id) if stop_order_id else '',
-                            buy_transaction_id=buy_transaction_id or 0,
-                            profit_target=profit_target,
-                            stop_loss_price=stop_price,
+                            side='SELL',
                             quantity=sell_quantity,
-                            kept_quantity=kept_quantity
+                            price=f"{target_price:.{price_precision}f}",
+                            stopPrice=f"{stop_price:.{price_precision}f}",
+                            stopLimitPrice=f"{stop_limit_price:.{price_precision}f}",
+                            stopLimitTimeInForce='GTC'
                         )
                         
-                        self.logger.info(f"💾 Ordre OCO enregistré en base (DB ID: {oco_db_id})")
+                        self.logger.info(f"✅ ORDRE OCO PLACÉ {symbol}")
                         
-                        # Log de vérification insertion
+                        # 🔥 EXTRACTION IDS BULLETPROOF - UTILISER orderReports !
+                        profit_order_id = None
+                        stop_order_id = None
+                        oco_order_list_id = oco_order.get('orderListId', '')
+                        
+                        self.logger.debug(f"🔍 OCO Response: orderListId={oco_order_list_id}")
+                        
+                        # 🎯 CLEF DU SUCCÈS: orderReports contient les types !
+                        order_reports = oco_order.get('orderReports', [])
+                        self.logger.debug(f"🔍 OrderReports in OCO: {len(order_reports)}")
+                        
+                        if not order_reports:
+                            self.logger.error(f"❌ Pas d'orderReports dans la réponse OCO!")
+                            # Log de debug complet
+                            import json
+                            self.logger.error(f"Réponse OCO complète: {json.dumps(oco_order, indent=2)}")
+                        
+                        for i, order in enumerate(order_reports):
+                            order_id = order.get('orderId')
+                            order_type = order.get('type')
+                            order_side = order.get('side', '')
+                            order_price = order.get('price', 'N/A')
+                            stop_price_field = order.get('stopPrice', 'N/A')
+                            
+                            self.logger.info(f"  OrderReport {i+1}: ID={order_id}, Type={order_type}, Side={order_side}")
+                            self.logger.debug(f"    Price={order_price}, StopPrice={stop_price_field}")
+                            
+                            # ✅ LOGIQUE EXACTE BASÉE SUR VOTRE TEST RÉUSSI
+                            if order_type == 'LIMIT_MAKER':
+                                profit_order_id = order_id
+                                self.logger.info(f"   📈 Profit Order: {profit_order_id}")
+                            elif order_type == 'STOP_LOSS_LIMIT':
+                                stop_order_id = order_id 
+                                self.logger.info(f"   🛡️ Stop Order: {stop_order_id}")
+                            else:
+                                self.logger.warning(f"   ❓ Type inconnu: {order_type}")
+                        
+                        # Vérification finale avec logs détaillés
+                        self.logger.info(f"🎯 === RÉSULTAT EXTRACTION IDs ===")
+                        self.logger.info(f"Profit Order ID: {profit_order_id}")
+                        self.logger.info(f"Stop Order ID: {stop_order_id}")
+                        
                         if profit_order_id and stop_order_id:
-                            self.logger.info(f"✅ INSERTION COMPLÈTE avec les 2 IDs")
+                            self.logger.info(f"✅ EXTRACTION RÉUSSIE - 2 IDs récupérés")
                         elif profit_order_id or stop_order_id:
-                            self.logger.warning(f"⚠️ INSERTION PARTIELLE (1 ID manquant)")
+                            self.logger.warning(f"⚠️ EXTRACTION PARTIELLE - 1 seul ID récupéré")
                         else:
-                            self.logger.error(f"❌ INSERTION SANS IDs (problème critique)")
+                            self.logger.error(f"❌ EXTRACTION ÉCHOUÉE - Aucun ID récupéré")
                         
-                    except Exception as db_error:
-                        # L'ordre est placé sur Binance mais pas en base - log l'erreur
-                        self.logger.error(f"❌ Erreur insertion OCO en base: {db_error}")
-                        import traceback
-                        self.logger.debug(traceback.format_exc())
-                        oco_db_id = None
-                    
-                    return {
-                        'success': True,
-                        'order_type': 'OCO',
-                        'oco_order': oco_order,
-                        'target_price': target_price,
-                        'stop_price': stop_price,
-                        'quantity': sell_quantity,
-                        'kept_quantity': kept_quantity,
-                        'oco_db_id': oco_db_id,
-                        'profit_order_id': profit_order_id,
-                        'stop_order_id': stop_order_id,
-                        'simulation': False
-                    }
-                    
-                except Exception as oco_error:
-                    self.logger.warning(f"⚠️  Échec ordre OCO, fallback vers ordre limite: {oco_error}")
-                    use_oco_orders = False
+                        # 🔥 INSERTION EN BASE BULLETPROOF
+                        try:
+                            oco_db_id = self.database.insert_oco_order(
+                                symbol=symbol,
+                                oco_order_id=str(oco_order_list_id),
+                                profit_order_id=str(profit_order_id) if profit_order_id else '',
+                                stop_order_id=str(stop_order_id) if stop_order_id else '',
+                                buy_transaction_id=buy_transaction_id or 0,
+                                profit_target=profit_target,
+                                stop_loss_price=stop_price,
+                                quantity=sell_quantity,
+                                kept_quantity=kept_quantity
+                            )
+                            
+                            self.logger.info(f"💾 Ordre OCO enregistré en base (DB ID: {oco_db_id})")
+                            
+                            # Log de vérification insertion
+                            if profit_order_id and stop_order_id:
+                                self.logger.info(f"✅ INSERTION COMPLÈTE avec les 2 IDs")
+                            elif profit_order_id or stop_order_id:
+                                self.logger.warning(f"⚠️ INSERTION PARTIELLE (1 ID manquant)")
+                            else:
+                                self.logger.error(f"❌ INSERTION SANS IDs (problème critique)")
+                            
+                        except Exception as db_error:
+                            # L'ordre est placé sur Binance mais pas en base - log l'erreur
+                            self.logger.error(f"❌ Erreur insertion OCO en base: {db_error}")
+                            import traceback
+                            self.logger.debug(traceback.format_exc())
+                            oco_db_id = None
+                        
+                        return {
+                            'success': True,
+                            'order_type': 'OCO',
+                            'oco_order': oco_order,
+                            'target_price': target_price,
+                            'stop_price': stop_price,
+                            'quantity': sell_quantity,
+                            'kept_quantity': kept_quantity,
+                            'oco_db_id': oco_db_id,
+                            'profit_order_id': profit_order_id,
+                            'stop_order_id': stop_order_id,
+                            'simulation': False
+                        }
+                        
+                    except Exception as oco_error:
+                        self.logger.warning(f"⚠️  Échec ordre OCO, fallback vers ordre limite: {oco_error}")
+                        use_oco_orders = False
             
             if not use_oco_orders:
                 # Ordre limite classique (fallback)

@@ -441,7 +441,7 @@ sudo tail /var/log/syslog | grep CRON
     "stop_limit_buffer": 0.001
   },
   "advanced_strategy": {
-    "future_transfer_enabled": true
+    "hold": true
   },
   "cryptos": {
     "BTC": {
