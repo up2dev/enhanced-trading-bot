@@ -722,6 +722,24 @@ class TradingEngine:
                 self.logger.info(f"   📈 ID: {limit_order['orderId']}")
                 self.logger.warning(f"⚠️  Pas de protection stop-loss (ordre limite simple)")
                 
+                # 🆕 ENREGISTRER EN BASE
+                try:
+                    limit_db_id = self.database.insert_limit_order(
+                        symbol=symbol,
+                        order_id=str(limit_order['orderId']),
+                        buy_transaction_id=buy_transaction_id or 0,
+                        profit_target=profit_target,
+                        target_price=target_price,
+                        quantity=sell_quantity,
+                        kept_quantity=kept_quantity
+                    )
+                    
+                    self.logger.info(f"💾 Ordre LIMIT enregistré en base (DB ID: {limit_db_id})")
+                    
+                except Exception as db_error:
+                    self.logger.error(f"❌ Erreur insertion LIMIT en base: {db_error}")
+                    limit_db_id = None
+                
                 return {
                     'success': True,
                     'order_type': 'LIMIT',
@@ -729,6 +747,7 @@ class TradingEngine:
                     'target_price': target_price,
                     'quantity': sell_quantity,
                     'kept_quantity': kept_quantity,
+                    'limit_db_id': limit_db_id,
                     'simulation': False
                 }
             
@@ -801,6 +820,88 @@ class TradingEngine:
             self.logger.error(f"❌ Erreur vérification OCO enhanced: {e}")
             return False
 
+    def monitor_limit_orders(self):
+        """Surveillance des ordres LIMIT simples"""
+        try:
+            # Récupérer les ordres LIMIT actifs depuis la DB
+            active_limit_orders = self.database.get_active_limit_orders()
+            
+            if not active_limit_orders:
+                self.logger.debug("🔍 Aucun ordre LIMIT à surveiller")
+                return
+            
+            self.logger.info(f"🔍 Surveillance de {len(active_limit_orders)} ordre(s) LIMIT actifs")
+            
+            updated_count = 0
+            
+            for limit_order in active_limit_orders:
+                try:
+                    symbol = limit_order['symbol']
+                    order_id = limit_order['order_id']
+                    
+                    # Vérifier le statut sur Binance
+                    order = self.binance_client._make_request_with_retry(
+                        self.binance_client.client.get_order,
+                        symbol=symbol,
+                        orderId=int(order_id)
+                    )
+                    
+                    if order['status'] == 'FILLED':
+                        # Ordre exécuté !
+                        exec_price = float(order['price'])
+                        exec_qty = float(order['executedQty'])
+                        
+                        self.logger.info(f"🎯 LIMITE EXÉCUTÉE {symbol}! Prix: {exec_price:.6f}, Qty: {exec_qty:.8f}")
+                        
+                        # Mettre à jour la DB
+                        self.database.update_limit_execution(order_id, exec_price, exec_qty)
+                        
+                        # 🔥 CRÉER LA TRANSACTION DE VENTE avec COMMISSIONS CORRECTES
+                        try:
+                            # 🚀 CORRECTION: Context manager
+                            with self.database.get_connection() as conn:
+                                cursor = conn.execute(
+                                    "SELECT id FROM transactions WHERE order_id = ? AND order_side = 'SELL'",
+                                    (order_id,)
+                                )
+                                existing_tx = cursor.fetchone()
+                            
+                            if not existing_tx:
+                                # 🚀 RÉCUPÉRER COMMISSIONS RÉELLES
+                                commission, commission_asset = self.database.get_order_commissions_from_binance(
+                                    self.binance_client, symbol, order_id
+                                )
+                                
+                                tx_id = self.database.insert_transaction(
+                                    symbol=symbol,
+                                    order_id=order_id,
+                                    transact_time=str(order.get('time', int(time.time() * 1000))),
+                                    order_type=order.get('type', 'LIMIT'),
+                                    order_side='SELL',
+                                    price=exec_price,
+                                    qty=exec_qty,
+                                    commission=commission,  # 🔥 COMMISSION CORRECTE
+                                    commission_asset=commission_asset  # 🔥 ASSET CORRECT
+                                )
+                                
+                                if tx_id > 0:
+                                    self.logger.info(f"   📝 Transaction VENTE LIMIT créée: {exec_qty:.8f} @ {exec_price:.6f}")
+                                    self.logger.info(f"   💰 Commission: {commission:.8f} {commission_asset}")
+                            
+                        except Exception as tx_error:
+                            self.logger.error(f"❌ Erreur création transaction LIMIT: {tx_error}")
+                        
+                        updated_count += 1
+                        
+                except Exception as e:
+                    self.logger.debug(f"Erreur vérification LIMIT {limit_order.get('order_id', 'UNKNOWN')}: {e}")
+            
+            if updated_count > 0:
+                self.logger.info(f"📝 {updated_count} ordre(s) LIMIT mis à jour")
+                    
+        except Exception as e:
+            self.logger.error(f"❌ Erreur surveillance LIMIT: {e}")
+
     def _handle_oco_execution_direct(self, oco_order: Dict, executed_order: Dict, execution_type: str):
         """🔥 Traite l'exécution OCO avec création transaction BULLETPROOF"""
         try:
@@ -835,33 +936,47 @@ class TradingEngine:
                 execution_type
             )
             
-            # 2. 🔥 CRÉER LA TRANSACTION DE VENTE (BULLETPROOF)
+            # 2. 🔥 CRÉER LA TRANSACTION DE VENTE avec COMMISSIONS CORRECTES
             try:
-                # Vérifier si la transaction existe déjà - UTILISER LE CONTEXT MANAGER
+                # 🚀 CORRECTION: Utiliser context manager + récupérer commissions
                 with self.database.get_connection() as conn:
                     cursor = conn.execute(
                         "SELECT id FROM transactions WHERE order_id = ? AND order_side = 'SELL'",
                         (order_id,)
                     )
                     existing_tx = cursor.fetchone()
-
+                
                 if existing_tx:
                     self.logger.debug(f"   ✅ Transaction vente déjà existante (ID: {existing_tx[0]})")
                 else:
-                    order_time = executed_order.get('updateTime') or executed_order.get('time') or int(time.time() * 1000)
-                    # Créer la transaction de vente
-                    self.database.insert_transaction(
+                    # 🚀 RÉCUPÉRER COMMISSIONS RÉELLES DEPUIS BINANCE
+                    commission, commission_asset = self.database.get_order_commissions_from_binance(
+                        self.binance_client, symbol, order_id
+                    )
+                    
+                    self.logger.debug(f"   💰 Commission récupérée: {commission:.8f} {commission_asset}")
+                    
+                    # 🔧 CORRECTION TIMESTAMP : Utiliser les données de l'ordre exécuté
+                    order_time = executed_order.get('time', executed_order.get('updateTime', int(time.time() * 1000)))
+                    
+                    # Créer la transaction de vente avec commissions correctes
+                    tx_id = self.database.insert_transaction(
                         symbol=symbol,
                         order_id=order_id,
-                        transact_time=str(order_time),
+                        transact_time=str(order_time),  # 🔧 CORRECTION ICI !
                         order_type=executed_order.get('type', 'LIMIT'),
                         order_side='SELL',  # 🎯 CRUCIAL : C'est une VENTE !
                         price=exec_price,
                         qty=exec_qty,
-                        commission=float(executed_order.get('commission', 0.0)),
-                        commission_asset=executed_order.get('commissionAsset', 'USDC')
+                        commission=commission,  # 🔥 COMMISSION CORRECTE !
+                        commission_asset=commission_asset  # 🔥 ASSET CORRECT !
                     )
-                    self.logger.info(f"   📝 Transaction VENTE créée: {exec_qty:.8f} @ {exec_price:.6f}")
+                    
+                    if tx_id > 0:
+                        self.logger.info(f"   📝 Transaction VENTE créée: {exec_qty:.8f} @ {exec_price:.6f}")
+                        self.logger.info(f"   💰 Commission: {commission:.8f} {commission_asset}")
+                    else:
+                        self.logger.error(f"   ❌ Échec création transaction")
                     
             except Exception as tx_error:
                 self.logger.error(f"❌ Erreur gestion transaction vente: {tx_error}")

@@ -71,9 +71,33 @@ class DatabaseManager:
                     )
                 """)
                 
+                # 🆕 NOUVELLE TABLE LIMIT ORDERS
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS limit_orders (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        symbol TEXT NOT NULL,
+                        order_id TEXT NOT NULL UNIQUE,
+                        buy_transaction_id INTEGER,
+                        status TEXT DEFAULT 'ACTIVE',
+                        profit_target REAL,
+                        target_price REAL,
+                        quantity REAL,
+                        kept_quantity REAL DEFAULT 0,
+                        execution_price REAL,
+                        execution_qty REAL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        executed_at TIMESTAMP,
+                        FOREIGN KEY (buy_transaction_id) REFERENCES transactions(id)
+                    )
+                """)
+                
                 # Index OCO pour monitoring
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_oco_status ON oco_orders(status)")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_oco_symbol ON oco_orders(symbol)")
+                
+                # 🆕 Index LIMIT ORDERS
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_limit_status ON limit_orders(status)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_limit_symbol ON limit_orders(symbol)")
                 
                 conn.commit()
                 self.logger.info("✅ Tables essentielles créées")
@@ -81,7 +105,6 @@ class DatabaseManager:
         except Exception as e:
             self.logger.error(f"❌ Erreur initialisation base: {e}")
             raise
-    
     @contextmanager
     def get_connection(self):
         """Context manager thread-safe optimisé Pi"""
@@ -248,16 +271,14 @@ class DatabaseManager:
             return None
     
     def get_quick_stats(self) -> Dict:
-        """Stats rapides pour les logs - VERSION CORRIGÉE timestamps"""
+        """Stats rapides avec LIMIT orders"""
         try:
             today = datetime.now().strftime('%Y-%m-%d')
-            
-            # 🔧 CORRECTION: Timestamps Binance en millisecondes !
-            today_start = int(datetime.strptime(today, '%Y-%m-%d').timestamp() * 1000)  # x1000
-            today_end = today_start + (86400 * 1000)  # +24h en millisecondes
+            today_start = int(datetime.strptime(today, '%Y-%m-%d').timestamp() * 1000)
+            today_end = today_start + (86400 * 1000)
             
             with self.get_connection() as conn:
-                # Achats du jour - VERSION CORRIGÉE
+                # Achats du jour
                 cursor = conn.execute("""
                     SELECT COUNT(*) FROM transactions 
                     WHERE order_side = 'BUY'
@@ -270,23 +291,21 @@ class DatabaseManager:
                 cursor = conn.execute("SELECT COUNT(*) FROM oco_orders WHERE status = 'ACTIVE'")
                 active_oco = cursor.fetchone()[0]
                 
-                # Total transactions
-                cursor = conn.execute("SELECT COUNT(*) FROM transactions")
-                total_transactions = cursor.fetchone()[0]
-                
-                # Debug pour vérification
-                self.logger.debug(f"🔍 Stats quick: {daily_buys} achats aujourd'hui (range: {today_start}-{today_end})")
+                # 🆕 LIMIT actifs
+                cursor = conn.execute("SELECT COUNT(*) FROM limit_orders WHERE status = 'ACTIVE'")
+                active_limits = cursor.fetchone()[0]
                 
                 return {
                     'daily_buys': daily_buys,
                     'active_oco': active_oco,
-                    'total_transactions': total_transactions
+                    'active_limits': active_limits,
+                    'total_active_sells': active_oco + active_limits
                 }
                 
         except Exception as e:
             self.logger.error(f"❌ Erreur stats: {e}")
-            return {'daily_buys': 0, 'active_oco': 0, 'total_transactions': 0}
-    
+            return {'daily_buys': 0, 'active_oco': 0, 'active_limits': 0, 'total_active_sells': 0}
+
     def cleanup_old_transactions(self, days_to_keep: int = 30):
         """Nettoyage léger (OPTIONNELLE)"""
         try:
@@ -306,3 +325,98 @@ class DatabaseManager:
                 
         except Exception as e:
             self.logger.error(f"❌ Erreur nettoyage: {e}")
+
+    def insert_limit_order(self, symbol: str, order_id: str, buy_transaction_id: int,
+                        profit_target: float, target_price: float, quantity: float,
+                        kept_quantity: float = 0) -> int:
+        """Insère un ordre LIMIT simple (fallback OCO)"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.execute("""
+                    INSERT INTO limit_orders 
+                    (symbol, order_id, buy_transaction_id, profit_target, 
+                    target_price, quantity, kept_quantity)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (symbol, order_id, buy_transaction_id, profit_target,
+                    target_price, quantity, kept_quantity))
+                
+                limit_id = cursor.lastrowid
+                conn.commit()
+                
+                self.logger.info(f"📈 LIMIT enregistré: {symbol} - {order_id}")
+                return limit_id
+                
+        except Exception as e:
+            self.logger.error(f"❌ Erreur LIMIT: {e}")
+            return 0
+
+    def get_active_limit_orders(self) -> List[Dict]:
+        """Récupère les ordres LIMIT actifs pour monitoring"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.execute("""
+                    SELECT * FROM limit_orders 
+                    WHERE status = 'ACTIVE'
+                    ORDER BY created_at DESC
+                """)
+                
+                orders = [dict(row) for row in cursor.fetchall()]
+                
+                if orders:
+                    self.logger.debug(f"🔍 {len(orders)} ordre(s) LIMIT actifs trouvés")
+                
+                return orders
+                
+        except Exception as e:
+            self.logger.error(f"❌ Erreur récupération LIMIT actifs: {e}")
+            return []
+
+    def update_limit_execution(self, order_id: str, execution_price: float, 
+                            execution_qty: float):
+        """Met à jour un ordre LIMIT exécuté"""
+        try:
+            with self.get_connection() as conn:
+                conn.execute("""
+                    UPDATE limit_orders 
+                    SET status = 'FILLED', execution_price = ?, execution_qty = ?,
+                        executed_at = CURRENT_TIMESTAMP
+                    WHERE order_id = ?
+                """, (execution_price, execution_qty, order_id))
+                
+                if conn.total_changes > 0:
+                    conn.commit()
+                    self.logger.info(f"🔄 LIMIT mis à jour: {order_id} -> FILLED")
+                else:
+                    self.logger.warning(f"⚠️  LIMIT {order_id} non trouvé pour mise à jour")
+                
+        except Exception as e:
+            self.logger.error(f"❌ Erreur update LIMIT: {e}")
+
+    def get_order_commissions_from_binance(self, binance_client, symbol: str, order_id: str) -> tuple:
+        """Récupère les commissions réelles depuis Binance"""
+        try:
+            order_details = binance_client._make_request_with_retry(
+                binance_client.client.get_order,
+                symbol=symbol,
+                orderId=int(order_id)
+            )
+            
+            if 'fills' in order_details and order_details['fills']:
+                total_commission = 0.0
+                commission_asset = 'USDC'
+                
+                for fill in order_details['fills']:
+                    fill_commission = float(fill.get('commission', 0.0))
+                    fill_asset = fill.get('commissionAsset', 'USDC')
+                    
+                    # Simple : garder la commission dans son asset original
+                    total_commission += fill_commission
+                    commission_asset = fill_asset
+                
+                return total_commission, commission_asset
+            
+            return 0.0, 'USDC'
+            
+        except Exception as e:
+            self.logger.error(f"❌ Erreur récupération commissions: {e}")
+            return 0.0, 'USDC'

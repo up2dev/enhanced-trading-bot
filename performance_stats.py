@@ -138,49 +138,76 @@ class PerformanceAnalyzer:
         except (KeyError, IndexError, TypeError):
             unique_symbols = 0
         
-        # 2. CALCULER LA VALEUR DES CRYPTOS MISES DE CÔTÉ
-        print("🔍 Calcul de la valeur des cryptos mises de côté...")
-        
-        # Récupérer les cryptos avec balance > 0 depuis les OCO
-        cursor = self.conn.execute("""
-            SELECT 
-                symbol,
-                COALESCE(SUM(kept_quantity), 0) as total_kept
-            FROM oco_orders 
-            WHERE kept_quantity > 0 
-            AND created_at >= ?
-            GROUP BY symbol
-        """, [date_filter.strftime('%Y-%m-%d')])
-        
-        kept_cryptos = cursor.fetchall()
-        total_holdings_value = 0.0
-        
-        if kept_cryptos:
-            print("\n💎 Cryptos mises de côté:")
+        # 2. CALCULER LA VALEUR DES CRYPTOS MISES DE CÔTÉ (OCO + LIMIT)
+            print("🔍 Calcul de la valeur des cryptos mises de côté...")
             
-            for crypto in kept_cryptos:
-                try:
-                    symbol = self.safe_row_access(crypto, 'symbol', 'UNKNOWN')
-                    kept_qty = self._safe_float(self.safe_row_access(crypto, 'total_kept', 0))
-                except (KeyError, IndexError, TypeError):
-                    continue
+            # 🔄 CORRECTION: Récupérer depuis OCO ET LIMIT
+            cursor = self.conn.execute("""
+                SELECT 
+                    symbol,
+                    COALESCE(SUM(kept_quantity), 0) as total_kept,
+                    'OCO' as source
+                FROM oco_orders 
+                WHERE kept_quantity > 0 
+                AND created_at >= ?
+                GROUP BY symbol
                 
-                if kept_qty > 0:
-                    # Récupérer le dernier prix connu
-                    cursor = self.conn.execute("""
-                        SELECT price FROM transactions 
-                        WHERE symbol = ? 
-                        ORDER BY created_at DESC 
-                        LIMIT 1
-                    """, [symbol])
+                UNION ALL
+                
+                SELECT 
+                    symbol,
+                    COALESCE(SUM(kept_quantity), 0) as total_kept,
+                    'LIMIT' as source
+                FROM limit_orders 
+                WHERE kept_quantity > 0 
+                AND created_at >= ?
+                GROUP BY symbol
+            """, [date_filter.strftime('%Y-%m-%d'), date_filter.strftime('%Y-%m-%d')])
+            
+            kept_cryptos = cursor.fetchall()
+            total_holdings_value = 0.0
+            
+            if kept_cryptos:
+                print("\n💎 Cryptos mises de côté:")
+                
+                # Grouper par symbol pour éviter les doublons
+                crypto_holdings = {}
+                
+                for crypto in kept_cryptos:
+                    try:
+                        symbol = self.safe_row_access(crypto, 'symbol', 'UNKNOWN')
+                        kept_qty = self._safe_float(self.safe_row_access(crypto, 'total_kept', 0))
+                        source = self.safe_row_access(crypto, 'source', 'UNKNOWN')
+                        
+                        if symbol not in crypto_holdings:
+                            crypto_holdings[symbol] = {'qty': 0, 'sources': []}
+                        
+                        crypto_holdings[symbol]['qty'] += kept_qty
+                        crypto_holdings[symbol]['sources'].append(source)
+                        
+                    except (KeyError, IndexError, TypeError):
+                        continue
+                
+                for symbol, data in crypto_holdings.items():
+                    kept_qty = data['qty']
+                    sources = ', '.join(set(data['sources']))
                     
-                    last_price_row = cursor.fetchone()
-                    last_price = self._safe_float(last_price_row[0]) if last_price_row else 0
-                    
-                    holding_value = kept_qty * last_price
-                    total_holdings_value += holding_value
-                    
-                    print(f"   {symbol}: {kept_qty:.8f} @ {last_price:.6f} = {holding_value:.2f} USDC")
+                    if kept_qty > 0:
+                        # Récupérer le dernier prix connu
+                        cursor = self.conn.execute("""
+                            SELECT price FROM transactions 
+                            WHERE symbol = ? 
+                            ORDER BY created_at DESC 
+                            LIMIT 1
+                        """, [symbol])
+                        
+                        last_price_row = cursor.fetchone()
+                        last_price = self._safe_float(last_price_row[0]) if last_price_row else 0
+                        
+                        holding_value = kept_qty * last_price
+                        total_holdings_value += holding_value
+                        
+                        print(f"   {symbol}: {kept_qty:.8f} @ {last_price:.6f} = {holding_value:.2f} USDC ({sources})")
         
         # 3. CALCUL CORRIGÉ DU PROFIT
         net_profit_basic = total_sold - total_invested - total_fees
@@ -316,94 +343,6 @@ class PerformanceAnalyzer:
         else:
             print("📭 Aucune donnée mensuelle trouvée")
     
-    def get_oco_performance(self):
-        """Performance des ordres OCO AVEC CRYPTO GARDÉE"""
-        print(f"\n🎯 === PERFORMANCE ORDRES OCO (COMPLÈTE) ===")
-        
-        # 1. STATISTIQUES DE BASE par statut
-        cursor = self.conn.execute("""
-            SELECT 
-                COALESCE(status, 'UNKNOWN') as status,
-                COUNT(*) as count,
-                COALESCE(AVG(execution_price), 0) as avg_execution_price,
-                COALESCE(SUM(execution_qty), 0) as total_execution_qty,
-                COALESCE(AVG(profit_target), 0) as avg_profit_target,
-                COALESCE(SUM(kept_quantity), 0) as total_kept_qty
-            FROM oco_orders 
-            WHERE status != 'ACTIVE' AND status IS NOT NULL
-            GROUP BY status
-            ORDER BY count DESC
-        """)
-        
-        oco_stats = cursor.fetchall()
-        
-        if oco_stats:
-            headers = ["Statut", "Nombre", "Prix moy.", "Qty exécutée", "Qty gardée", "Profit cible %"]
-            rows = []
-            
-            for stat in oco_stats:
-                avg_price = self._safe_float(stat['avg_execution_price'])
-                exec_qty = self._safe_float(stat['total_execution_qty'])
-                kept_qty = self._safe_float(stat['total_kept_qty'])
-                avg_target = self._safe_float(stat['avg_profit_target'])
-                
-                rows.append([
-                    stat['status'] or 'UNKNOWN',
-                    self._safe_int(stat['count']),
-                    f"{avg_price:.6f}" if avg_price > 0 else "N/A",
-                    f"{exec_qty:.8f}" if exec_qty > 0 else "N/A",
-                    f"{kept_qty:.8f}" if kept_qty > 0 else "N/A",
-                    f"{avg_target:.1f}%" if avg_target > 0 else "N/A"
-                ])
-            
-            print(tabulate(rows, headers=headers, tablefmt="grid"))
-        
-        # OCO actifs
-        cursor = self.conn.execute("SELECT COUNT(*) FROM oco_orders WHERE status = 'ACTIVE'")
-        active_oco = self._safe_int(cursor.fetchone()[0])
-        print(f"\n🔄 Ordres OCO actifs: {active_oco}")
-        
-        # DÉTAIL DES OCO ACTIFS
-        if active_oco > 0:
-            print(f"\n📋 === DÉTAIL OCO ACTIFS ===")
-            
-            cursor = self.conn.execute("""
-                SELECT symbol, quantity, kept_quantity, profit_target, 
-                    stop_loss_price, created_at
-                FROM oco_orders 
-                WHERE status = 'ACTIVE'
-                ORDER BY created_at DESC
-            """)
-            
-            active_orders = cursor.fetchall()
-            
-            headers = ["Crypto", "Qty totale", "Qty gardée", "Profit %", "Stop-loss", "Âge (jours)"]
-            rows = []
-            
-            for order in active_orders:
-                try:
-                    created_at = self.safe_row_access(order, 'created_at', '2024-01-01T00:00:00')
-                    age_days = (datetime.now() - datetime.fromisoformat(created_at)).days
-                    qty_total = self._safe_float(order['quantity'])
-                    qty_kept = self._safe_float(order['kept_quantity'])
-                    profit_target = self._safe_float(order['profit_target'])
-                    stop_loss = self._safe_float(order['stop_loss_price'])
-                    symbol = self.safe_row_access(order, 'symbol', 'UNKNOWN').replace('USDC', '')
-                    
-                    rows.append([
-                        symbol,
-                        f"{qty_total:.8f}",
-                        f"{qty_kept:.8f}",
-                        f"+{profit_target:.1f}%",
-                        f"{stop_loss:.6f}",
-                        f"{age_days}j"
-                    ])
-                except Exception as e:
-                    print(f"⚠️ Erreur traitement ordre: {e}")
-            
-            if rows:
-                print(tabulate(rows, headers=headers, tablefmt="grid"))
-
     def get_best_worst_trades(self, limit=10):
         """Meilleurs et pires trades - VERSION SÉCURISÉE"""
         print(f"\n🏆 === TOP {limit} TRADES RÉCENTS ===")
@@ -564,6 +503,183 @@ class PerformanceAnalyzer:
         """Ferme la connexion"""
         if self.conn:
             self.conn.close()
+
+    def get_oco_performance(self):
+        """Performance des ordres OCO ET LIMIT AVEC CRYPTO GARDÉE"""
+        print(f"\n🎯 === PERFORMANCE ORDRES DE VENTE (OCO + LIMIT) ===")
+        
+        # 1. STATISTIQUES OCO
+        print("🎯 Ordres OCO:")
+        cursor = self.conn.execute("""
+            SELECT 
+                COALESCE(status, 'UNKNOWN') as status,
+                COUNT(*) as count,
+                COALESCE(AVG(execution_price), 0) as avg_execution_price,
+                COALESCE(SUM(execution_qty), 0) as total_execution_qty,
+                COALESCE(AVG(profit_target), 0) as avg_profit_target,
+                COALESCE(SUM(kept_quantity), 0) as total_kept_qty
+            FROM oco_orders 
+            WHERE status != 'ACTIVE' AND status IS NOT NULL
+            GROUP BY status
+            ORDER BY count DESC
+        """)
+        
+        oco_stats = cursor.fetchall()
+        
+        if oco_stats:
+            headers = ["Statut OCO", "Nombre", "Prix moy.", "Qty exécutée", "Qty gardée", "Profit cible %"]
+            rows = []
+            
+            for stat in oco_stats:
+                avg_price = self._safe_float(stat['avg_execution_price'])
+                exec_qty = self._safe_float(stat['total_execution_qty'])
+                kept_qty = self._safe_float(stat['total_kept_qty'])
+                avg_target = self._safe_float(stat['avg_profit_target'])
+                
+                rows.append([
+                    stat['status'] or 'UNKNOWN',
+                    self._safe_int(stat['count']),
+                    f"{avg_price:.6f}" if avg_price > 0 else "N/A",
+                    f"{exec_qty:.8f}" if exec_qty > 0 else "N/A",
+                    f"{kept_qty:.8f}" if kept_qty > 0 else "N/A",
+                    f"{avg_target:.1f}%" if avg_target > 0 else "N/A"
+                ])
+            
+            print(tabulate(rows, headers=headers, tablefmt="grid"))
+        else:
+            print("📭 Aucun ordre OCO exécuté")
+        
+        # 🆕 2. STATISTIQUES LIMIT ORDERS
+        print("\n📈 Ordres LIMIT:")
+        cursor = self.conn.execute("""
+            SELECT 
+                COALESCE(status, 'UNKNOWN') as status,
+                COUNT(*) as count,
+                COALESCE(AVG(execution_price), 0) as avg_execution_price,
+                COALESCE(SUM(execution_qty), 0) as total_execution_qty,
+                COALESCE(AVG(profit_target), 0) as avg_profit_target,
+                COALESCE(SUM(kept_quantity), 0) as total_kept_qty
+            FROM limit_orders 
+            WHERE status != 'ACTIVE' AND status IS NOT NULL
+            GROUP BY status
+            ORDER BY count DESC
+        """)
+        
+        limit_stats = cursor.fetchall()
+        
+        if limit_stats:
+            headers = ["Statut LIMIT", "Nombre", "Prix moy.", "Qty exécutée", "Qty gardée", "Profit cible %"]
+            rows = []
+            
+            for stat in limit_stats:
+                avg_price = self._safe_float(stat['avg_execution_price'])
+                exec_qty = self._safe_float(stat['total_execution_qty'])
+                kept_qty = self._safe_float(stat['total_kept_qty'])
+                avg_target = self._safe_float(stat['avg_profit_target'])
+                
+                rows.append([
+                    stat['status'] or 'UNKNOWN',
+                    self._safe_int(stat['count']),
+                    f"{avg_price:.6f}" if avg_price > 0 else "N/A",
+                    f"{exec_qty:.8f}" if exec_qty > 0 else "N/A",
+                    f"{kept_qty:.8f}" if kept_qty > 0 else "N/A",
+                    f"{avg_target:.1f}%" if avg_target > 0 else "N/A"
+                ])
+            
+            print(tabulate(rows, headers=headers, tablefmt="grid"))
+        else:
+            print("📭 Aucun ordre LIMIT exécuté")
+        
+        # 3. ORDRES ACTIFS (OCO + LIMIT)
+        cursor = self.conn.execute("SELECT COUNT(*) FROM oco_orders WHERE status = 'ACTIVE'")
+        active_oco = self._safe_int(cursor.fetchone()[0])
+        
+        cursor = self.conn.execute("SELECT COUNT(*) FROM limit_orders WHERE status = 'ACTIVE'")
+        active_limits = self._safe_int(cursor.fetchone()[0])
+        
+        print(f"\n🔄 Ordres actifs: {active_oco} OCO + {active_limits} LIMIT = {active_oco + active_limits} total")
+        
+        # 4. DÉTAIL DES ORDRES ACTIFS
+        if active_oco + active_limits > 0:
+            print(f"\n📋 === DÉTAIL ORDRES ACTIFS ===")
+            
+            # OCO actifs
+            if active_oco > 0:
+                print("🎯 OCO actifs:")
+                cursor = self.conn.execute("""
+                    SELECT symbol, quantity, kept_quantity, profit_target, 
+                        stop_loss_price, created_at
+                    FROM oco_orders 
+                    WHERE status = 'ACTIVE'
+                    ORDER BY created_at DESC
+                """)
+                
+                active_orders = cursor.fetchall()
+                headers = ["Crypto", "Qty totale", "Qty gardée", "Profit %", "Stop-loss", "Âge"]
+                rows = []
+                
+                for order in active_orders:
+                    try:
+                        created_at = self.safe_row_access(order, 'created_at', '2024-01-01T00:00:00')
+                        age_days = (datetime.now() - datetime.fromisoformat(created_at)).days
+                        qty_total = self._safe_float(order['quantity'])
+                        qty_kept = self._safe_float(order['kept_quantity'])
+                        profit_target = self._safe_float(order['profit_target'])
+                        stop_loss = self._safe_float(order['stop_loss_price'])
+                        symbol = self.safe_row_access(order, 'symbol', 'UNKNOWN').replace('USDC', '')
+                        
+                        rows.append([
+                            symbol,
+                            f"{qty_total:.8f}",
+                            f"{qty_kept:.8f}",
+                            f"+{profit_target:.1f}%",
+                            f"{stop_loss:.6f}",
+                            f"{age_days}j"
+                        ])
+                    except Exception as e:
+                        print(f"⚠️ Erreur traitement ordre OCO: {e}")
+                
+                if rows:
+                    print(tabulate(rows, headers=headers, tablefmt="grid"))
+            
+            # 🆕 LIMIT actifs
+            if active_limits > 0:
+                print("\n📈 LIMIT actifs:")
+                cursor = self.conn.execute("""
+                    SELECT symbol, quantity, kept_quantity, profit_target, 
+                        target_price, created_at
+                    FROM limit_orders 
+                    WHERE status = 'ACTIVE'
+                    ORDER BY created_at DESC
+                """)
+                
+                active_limits_data = cursor.fetchall()
+                headers = ["Crypto", "Qty totale", "Qty gardée", "Profit %", "Prix cible", "Âge"]
+                rows = []
+                
+                for order in active_limits_data:
+                    try:
+                        created_at = self.safe_row_access(order, 'created_at', '2024-01-01T00:00:00')
+                        age_days = (datetime.now() - datetime.fromisoformat(created_at)).days
+                        qty_total = self._safe_float(order['quantity'])
+                        qty_kept = self._safe_float(order['kept_quantity'])
+                        profit_target = self._safe_float(order['profit_target'])
+                        target_price = self._safe_float(order['target_price'])
+                        symbol = self.safe_row_access(order, 'symbol', 'UNKNOWN').replace('USDC', '')
+                        
+                        rows.append([
+                            symbol,
+                            f"{qty_total:.8f}",
+                            f"{qty_kept:.8f}",
+                            f"+{profit_target:.1f}%",
+                            f"{target_price:.6f}",
+                            f"{age_days}j"
+                        ])
+                    except Exception as e:
+                        print(f"⚠️ Erreur traitement ordre LIMIT: {e}")
+                
+                if rows:
+                    print(tabulate(rows, headers=headers, tablefmt="grid"))
 
 def main():
     parser = argparse.ArgumentParser(description="Analyseur de performance Trading Bot (Version corrigée)")
