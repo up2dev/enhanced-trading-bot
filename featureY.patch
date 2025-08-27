@@ -1,0 +1,140 @@
+diff --git a/dashboard_server.py b/dashboard_server.py
+new file mode 100755
+index 0000000..933c461
+--- /dev/null
++++ b/dashboard_server.py
+@@ -0,0 +1,45 @@
++#!/usr/bin/env python3
++"""
++Enhanced Trading Bot - Dashboard Server
++Point d'entrée simple pour lancer le dashboard web
++"""
++
++import sys
++import os
++from pathlib import Path
++
++# Ajouter le dossier dashboard au path
++dashboard_path = Path(__file__).parent / "dashboard"
++sys.path.insert(0, str(dashboard_path))
++
++# Ajouter le dossier racine pour accès aux modules src
++sys.path.insert(0, str(Path(__file__).parent))
++
++if __name__ == "__main__":
++    try:
++        from dashboard.app import create_app
++        
++        print("🌐 === ENHANCED TRADING BOT DASHBOARD ===")
++        print("📊 Démarrage du serveur web...")
++        
++        app = create_app()
++        
++        print("✅ Dashboard disponible sur:")
++        print("   🏠 Local: http://localhost:5000")
++        print("   📱 Réseau: http://192.168.1.XXX:5000")
++        print("   🛑 Ctrl+C pour arrêter")
++        
++        app.run(
++            host='0.0.0.0',
++            port=5000,
++            debug=False,
++            use_reloader=False
++        )
++        
++    except ImportError as e:
++        print(f"❌ Erreur import dashboard: {e}")
++        print("💡 Installez les dépendances: pip install flask")
++        sys.exit(1)
++    except Exception as e:
++        print(f"❌ Erreur démarrage: {e}")
++        sys.exit(1)
+diff --git a/manage_dashboard.sh b/manage_dashboard.sh
+new file mode 100755
+index 0000000..99c7f05
+--- /dev/null
++++ b/manage_dashboard.sh
+@@ -0,0 +1,83 @@
++#!/bin/bash
++# Script de gestion du dashboard Enhanced Trading Bot
++
++DASHBOARD_SCRIPT="dashboard_server.py"
++DASHBOARD_PID_FILE="dashboard.pid"
++LOG_FILE="logs/dashboard.log"
++
++# Créer le dossier logs si nécessaire
++mkdir -p logs
++
++case "$1" in
++    start)
++        if [ -f "$DASHBOARD_PID_FILE" ] && kill -0 $(cat "$DASHBOARD_PID_FILE") 2>/dev/null; then
++            echo "⚠️  Dashboard déjà en cours (PID: $(cat $DASHBOARD_PID_FILE))"
++        else
++            echo "🚀 Démarrage du dashboard..."
++            source venv/bin/activate
++            nohup python3 $DASHBOARD_SCRIPT > $LOG_FILE 2>&1 &
++            PID=$!
++            echo $PID > $DASHBOARD_PID_FILE
++            sleep 2
++            if kill -0 $PID 2>/dev/null; then
++                echo "✅ Dashboard démarré (PID: $PID)"
++                echo "🔗 Accessible sur: http://localhost:5000"
++                echo "📋 Logs: tail -f $LOG_FILE"
++            else
++                echo "❌ Échec démarrage dashboard"
++                rm -f $DASHBOARD_PID_FILE
++            fi
++        fi
++        ;;
++    stop)
++        if [ -f "$DASHBOARD_PID_FILE" ]; then
++            PID=$(cat $DASHBOARD_PID_FILE)
++            echo "🛑 Arrêt du dashboard (PID: $PID)..."
++            kill $PID 2>/dev/null
++            rm -f $DASHBOARD_PID_FILE
++            sleep 2
++            if kill -0 $PID 2>/dev/null; then
++                echo "⚠️  Arrêt forcé..."
++                kill -9 $PID 2>/dev/null
++            fi
++            echo "✅ Dashboard arrêté"
++        else
++            echo "ℹ️  Dashboard déjà arrêté"
++        fi
++        ;;
++    restart)
++        $0 stop
++        sleep 2
++        $0 start
++        ;;
++    status)
++        if [ -f "$DASHBOARD_PID_FILE" ] && kill -0 $(cat "$DASHBOARD_PID_FILE") 2>/dev/null; then
++            PID=$(cat $DASHBOARD_PID_FILE)
++            echo "✅ Dashboard en cours (PID: $PID)"
++            echo "🔗 URL: http://localhost:5000"
++            echo "📋 Logs: tail -f $LOG_FILE"
++        else
++            echo "❌ Dashboard arrêté"
++            rm -f $DASHBOARD_PID_FILE 2>/dev/null
++        fi
++        ;;
++    logs)
++        if [ -f "$LOG_FILE" ]; then
++            echo "📋 Logs du dashboard (Ctrl+C pour quitter):"
++            tail -f $LOG_FILE
++        else
++            echo "❌ Fichier de logs non trouvé: $LOG_FILE"
++        fi
++        ;;
++    *)
++        echo "Usage: $0 {start|stop|restart|status|logs}"
++        echo ""
++        echo "Commandes:"
++        echo "  start   - Démarre le dashboard en arrière-plan"
++        echo "  stop    - Arrête le dashboard"
++        echo "  restart - Redémarre le dashboard"
++        echo "  status  - Affiche le statut du dashboard"
++        echo "  logs    - Affiche les logs en temps réel"
++        exit 1
++        ;;
++esac

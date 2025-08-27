@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block title %}Portfolio - Enhanced Trading Bot{% endblock %}
+
+{% block content %}
+<div class="portfolio-container">
+    <div class="page-header">
+        <h1>💰 Portfolio</h1>
+        <div class="portfolio-summary">
+            <div class="summary-card">
+                <span class="summary-label">Valeur totale</span>
+                <span class="summary-value" id="total-value">-- USDC</span>
+            </div>
+            <div class="summary-card">
+                <span class="summary-label">USDC libre</span>
+                <span class="summary-value" id="free-usdc">-- USDC</span>
+            </div>
+            <div class="summary-card">
+                <span class="summary-label">Cryptos actives</span>
+                <span class="summary-value" id="active-cryptos-count">--</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="portfolio-grid">
+        <!-- Allocation Chart -->
+        <div class="chart-section">
+            <h2>📈 Répartition du portefeuille</h2>
+            <div class="chart-container">
+                <canvas id="allocation-chart" width="400" height="300"></canvas>
+            </div>
+        </div>
+
+        <!-- Holdings Table -->
+        <div class="holdings-section">
+            <h2>💎 Holdings</h2>
+            <div class="table-container">
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Crypto</th>
+                            <th>Balance</th>
+                            <th>Prix actuel</th>
+                            <th>Valeur USDC</th>
+                            <th>Allocation</th>
+                            <th>Target</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="holdings-table">
+                        <tr>
+                            <td colspan="7" class="loading">Chargement des holdings...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Performance Section -->
+        <div class="performance-section">
+            <h2>📊 Performance</h2>
+            <div class="performance-grid">
+                <div class="perf-card">
+                    <div class="perf-label">Aujourd'hui</div>
+                    <div class="perf-value" id="perf-today">+0.00%</div>
+                </div>
+                <div class="perf-card">
+                    <div class="perf-label">7 jours</div>
+                    <div class="perf-value" id="perf-7d">+0.00%</div>
+                </div>
+                <div class="perf-card">
+                    <div class="perf-label">30 jours</div>
+                    <div class="perf-value" id="perf-30d">+0.00%</div>
+                </div>
+                <div class="perf-card">
+                    <div class="perf-label">Total</div>
+                    <div class="perf-value" id="perf-total">+0.00%</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="{{ url_for('static', filename='js/portfolio.js') }}?v=2025"></script>
+{% endblock %}

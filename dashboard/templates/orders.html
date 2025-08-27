@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block title %}Ordres - Enhanced Trading Bot{% endblock %}
+
+{% block content %}
+<div class="orders-container">
+    <div class="orders-header">
+        <h1>📋 Ordres OCO</h1>
+        <div class="last-update">
+            Dernière mise à jour: <span id="last-update-time">--</span>
+            <button class="refresh-btn" onclick="window.refreshOrders()" title="Actualiser">
+                🔄 Actualiser
+            </button>
+        </div>
+    </div>
+
+    <!-- Filtres -->
+    <div class="orders-filters">
+        <button class="filter-btn active" data-filter="all">
+            📋 Tous les ordres
+        </button>
+        <button class="filter-btn" data-filter="active">
+            🟢 Actifs
+        </button>
+        <button class="filter-btn" data-filter="filled">
+            ✅ Exécutés
+        </button>
+        <button class="filter-btn" data-filter="cancelled">
+            ❌ Annulés
+        </button>
+    </div>
+
+    <!-- Stats rapides -->
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-icon">🟢</div>
+            <div class="stat-content">
+                <div class="stat-value" id="active-orders-count">--</div>
+                <div class="stat-label">Ordres actifs</div>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon">✅</div>
+            <div class="stat-content">
+                <div class="stat-value" id="filled-orders-count">--</div>
+                <div class="stat-label">Profits réalisés</div>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon">🛡️</div>
+            <div class="stat-content">
+                <div class="stat-value" id="stop-loss-count">--</div>
+                <div class="stat-label">Stop-loss déclenchés</div>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <div class="stat-icon">💰</div>
+            <div class="stat-content">
+                <div class="stat-value" id="total-profit">--</div>
+                <div class="stat-label">Profit total USDC</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Liste des ordres -->
+    <div class="dashboard-section">
+        <h2>📋 Liste des ordres</h2>
+        <div id="orders-list-loader" class="loading" style="display:none;">Chargement des ordres...</div>
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Date/Heure</th>
+                        <th>Symbole</th>
+                        <th>Quantité</th>
+                        <th>Prix d'achat</th>
+                        <th>Profit cible</th>
+                        <th>Stop-loss</th>
+                        <th>Crypto gardée</th>
+                        <th>Statut</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="orders-table">
+                    <tr>
+                        <td colspan="9" class="loading">Chargement des ordres...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Historique des ordres exécutés -->
+    <div class="dashboard-section">
+        <h2>📊 Historique des exécutions</h2>
+        <div id="orders-history-loader" class="loading" style="display:none;">Chargement de l'historique...</div>
+        <div class="table-container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Date exécution</th>
+                        <th>Symbole</th>
+                        <th>Type</th>
+                        <th>Prix exécution</th>
+                        <th>Quantité</th>
+                        <th>Résultat</th>
+                        <th>Crypto gardée</th>
+                    </tr>
+                </thead>
+                <tbody id="orders-history-table">
+                    <tr>
+                        <td colspan="7" class="loading">Chargement de l'historique...</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/orders.js') }}?v=2025"></script>
+{% endblock %}
