@@ -10,6 +10,7 @@ import threading
 from typing import Optional, List, Dict
 from datetime import datetime, timedelta
 from contextlib import contextmanager
+from .utils import send_telegram_message, load_json_config
 
 class DatabaseManager:
     """Gestionnaire DB minimaliste et efficace"""
@@ -18,7 +19,14 @@ class DatabaseManager:
         self.db_path = db_path
         self.logger = logging.getLogger(__name__)
         self._lock = threading.Lock()
-        
+
+        #Charger la config Telegram si disponible
+        try:
+            config = load_json_config("config/config.json")
+            self.telegram_cfg = config.get("telegram", {})
+        except Exception:
+            self.telegram_cfg = {}
+
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self._init_database()
         
@@ -147,6 +155,12 @@ class DatabaseManager:
                 conn.commit()
                 
                 self.logger.debug(f"💾 Transaction: {symbol} {order_side} {qty:.6f}")
+                #Notification Telegram si activée
+                if getAttr(self, 'telegram_cfg', {}).get('enabled, False):
+                    bot_token = self.telegram_cfg.get('bot_token')
+                    chat_id = self.telegram_cfg.get('chat_id')
+                    msg = f"<b>Nouvelle transaction</b>\n<b>Type:</b> {order_side}\n<b>Symbole:</> {symbol}\n<b>Quantité:</b> {qty:.6f}\n<b>Prix:</b> {price:.4f} USDC"
+                    send_telegram_message(bot_token, chat_id, msg)
                 return transaction_id
                 
         except Exception as e:

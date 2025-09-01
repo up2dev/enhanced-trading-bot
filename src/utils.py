@@ -6,6 +6,7 @@ import os
 import json
 import logging
 import logging.handlers
+import requests
 from pathlib import Path
 from typing import Dict, Any
 from datetime import datetime
@@ -204,6 +205,26 @@ def get_system_info() -> Dict[str, Any]:
         pass
     
     return info
+
+def send_telegram_message(bot_token: str, chat_id: str, message: str) -> bool:
+    """Envoie un eessage Telegram (utilitaire global)"""
+    try:
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        payload = {
+            "chat_id": chat_id,
+            "text": message,
+            "parse_mode": "HTML"
+        }
+        response = requests.post(url, json=payload, timeout=5)
+        if response.status_code == 200:
+            logging.getLogger(__name__).debug("Message Telegram envoyé")
+            return True
+        else:
+            logging.getLogger(__name__).warning(f"Erreur envoi Telegram: {response.text}")
+            return False
+    except Exception as e:
+        logging.getLogger(__name__).warning(f" Exception Telegram: {e}")
+
 
 class RaspberryPiOptimizer:
     """Optimisations spécifiques Raspberry Pi"""

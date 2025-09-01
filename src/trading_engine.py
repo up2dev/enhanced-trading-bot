@@ -923,7 +923,7 @@ class TradingEngine:
             active_oco_orders = self.database.get_active_oco_orders()
             
             if not active_oco_orders:
-                self.logger.debug("🔍 Aucun ordre OCO à surveiller")
+                self.logger.info("🔍 Aucun ordre OCO à surveiller")
                 return
             
             self.logger.info(f"🔍 Surveillance de {len(active_oco_orders)} ordre(s) OCO actifs")
@@ -984,9 +984,9 @@ class TradingEngine:
         try:
             # Récupérer les ordres LIMIT actifs depuis la DB
             active_limit_orders = self.database.get_active_limit_orders()
-            
+
             if not active_limit_orders:
-                self.logger.debug("🔍 Aucun ordre LIMIT à surveiller")
+                self.logger.info("🔍 Aucun ordre LIMIT à surveiller")
                 return
             
             self.logger.info(f"🔍 Surveillance de {len(active_limit_orders)} ordre(s) LIMIT actifs")
