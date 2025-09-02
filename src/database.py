@@ -156,7 +156,7 @@ class DatabaseManager:
                 
                 self.logger.debug(f"💾 Transaction: {symbol} {order_side} {qty:.6f}")
                 #Notification Telegram si activée
-                if getAttr(self, 'telegram_cfg', {}).get('enabled, False):
+                if getattr(self, 'telegram_cfg', {}).get('enabled', False):
                     bot_token = self.telegram_cfg.get('bot_token')
                     chat_id = self.telegram_cfg.get('chat_id')
                     msg = f"<b>Nouvelle transaction</b>\n<b>Type:</b> {order_side}\n<b>Symbole:</> {symbol}\n<b>Quantité:</b> {qty:.6f}\n<b>Prix:</b> {price:.4f} USDC"
