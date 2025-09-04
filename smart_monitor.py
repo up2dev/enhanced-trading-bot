@@ -44,7 +44,7 @@ class SmartMonitor:
     def _load_telegram_config(self):
         """Charge la config Telegram existante"""
         try:
-            with open('config.json') as f:
+            with open('config/config.json') as f:
                 config = json.load(f)
                 telegram = config.get('telegram', {})
                 

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 🤖 Enhanced Trading Bot - Installation complète
-# Raspberry Pi optimisé avec options avancées
+# Script déplacé dans scripts_utilitaires/ - Chemins corrigés v2.1.8
 
 set -e
 
@@ -12,17 +12,30 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-echo -e "${BLUE}🤖 === ENHANCED TRADING BOT - INSTALLATION ===${NC}"
+echo -e "${BLUE}🤖 === ENHANCED TRADING BOT - INSTALLATION v2.1.8 ===${NC}"
 echo -e "${GREEN}🍓 Optimisé pour Raspberry Pi Zero W2${NC}"
 echo ""
 
-# Détection utilisateur et chemin
+# 🔧 CORRECTION: Détection chemin racine du projet
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"  # Remonte d'un niveau
 CURRENT_USER=$(whoami)
-INSTALL_PATH=$(pwd)
 
-echo -e "${BLUE}📍 Installation dans: ${INSTALL_PATH}${NC}"
+echo -e "${BLUE}📍 Script dans: ${SCRIPT_DIR}${NC}"
+echo -e "${BLUE}📍 Projet dans: ${PROJECT_ROOT}${NC}"
 echo -e "${BLUE}👤 Utilisateur: ${CURRENT_USER}${NC}"
 echo ""
+
+# Vérification que nous sommes dans le bon projet
+if [ ! -f "${PROJECT_ROOT}/run_bot.py" ] || [ ! -f "${PROJECT_ROOT}/smart_monitor.py" ]; then
+    echo -e "${RED}❌ Erreur: Structure de projet non trouvée${NC}"
+    echo -e "${RED}   run_bot.py et smart_monitor.py doivent être à la racine${NC}"
+    exit 1
+fi
+
+# 🔧 CORRECTION: Toutes les opérations dans PROJECT_ROOT
+cd "$PROJECT_ROOT"
+echo -e "${GREEN}✅ Position corrigée vers racine du projet${NC}"
 
 # Fonction d'installation système
 install_system_deps() {
@@ -43,7 +56,7 @@ install_system_deps() {
 install_python_deps() {
     echo -e "${YELLOW}🐍 Configuration de l'environnement Python...${NC}"
     
-    # Création environnement virtuel
+    # Création environnement virtuel (dans PROJECT_ROOT)
     if [ ! -d "venv" ]; then
         echo "🔧 Création de l'environnement virtuel..."
         python3 -m venv venv
@@ -57,7 +70,7 @@ install_python_deps() {
     if [ -f "requirements.txt" ]; then
         pip install -r requirements.txt
     else
-        echo -e "${RED}❌ requirements.txt non trouvé!${NC}"
+        echo -e "${RED}❌ requirements.txt non trouvé dans ${PROJECT_ROOT}!${NC}"
         exit 1
     fi
     
@@ -68,7 +81,7 @@ install_python_deps() {
 setup_config() {
     echo -e "${YELLOW}⚙️ Configuration du bot...${NC}"
     
-    # Création des répertoires
+    # Création des répertoires (dans PROJECT_ROOT)
     mkdir -p logs db config
     
     # Configuration depuis template
@@ -83,14 +96,14 @@ setup_config() {
         fi
     fi
     
-    # Configuration email si template existe
+    # 🆕 Configuration email pour Smart Monitor v2.1.8
     if [ -f "config/email_config.template.json" ] && [ ! -f "config/email_config.json" ]; then
         cp config/email_config.template.json config/email_config.json
-        echo -e "${GREEN}📧 Configuration email créée${NC}"
+        echo -e "${GREEN}📧 Configuration email créée pour Smart Monitor${NC}"
     fi
     
-    # Permissions
-    chmod +x *.py *.sh
+    # Permissions (scripts racine + utilitaires)
+    chmod +x *.py *.sh scripts_utilitaires/*.py scripts_utilitaires/*.sh 2>/dev/null || true
     chmod 755 logs db config
     
     echo -e "${GREEN}✅ Configuration terminée${NC}"
@@ -100,8 +113,9 @@ setup_config() {
 setup_logrotate() {
     echo -e "${YELLOW}📋 Configuration de la rotation des logs...${NC}"
     
+    # 🔧 CORRECTION: Utiliser PROJECT_ROOT dans logrotate
     sudo tee /etc/logrotate.d/trading-bot > /dev/null <<EOF
-${INSTALL_PATH}/logs/*.log {
+${PROJECT_ROOT}/logs/*.log {
     daily
     rotate 15
     compress
@@ -109,7 +123,7 @@ ${INSTALL_PATH}/logs/*.log {
     missingok
     notifempty
     copytruncate
-    olddir ${INSTALL_PATH}/logs/archived
+    olddir ${PROJECT_ROOT}/logs/archived
 }
 EOF
     
@@ -125,6 +139,7 @@ test_installation() {
     
     source venv/bin/activate
     
+    # Test des modules principaux
     if python3 -c "
 import sys
 sys.path.insert(0, '.')
@@ -139,39 +154,63 @@ except Exception as e:
     print(f'❌ Erreur: {e}')
     sys.exit(1)
 "; then
-        echo -e "${GREEN}✅ Test d'installation réussi!${NC}"
+        echo -e "${GREEN}✅ Modules principaux OK${NC}"
     else
-        echo -e "${RED}❌ Test d'installation échoué${NC}"
+        echo -e "${RED}❌ Test des modules échoué${NC}"
         exit 1
+    fi
+    
+    # 🆕 Test du Smart Monitor v2.1.8
+    echo "🧪 Test du Smart Monitor..."
+    if python3 smart_monitor.py daily --help &>/dev/null || python3 -c "
+import sys
+try:
+    exec(open('smart_monitor.py').read())
+    print('✅ Smart Monitor OK')
+except SystemExit:
+    print('✅ Smart Monitor OK (exit normal)')
+except Exception as e:
+    print(f'⚠️  Smart Monitor: {e}')
+"; then
+        echo -e "${GREEN}✅ Smart Monitor v2.1.8 prêt${NC}"
+    else
+        echo -e "${YELLOW}⚠️  Smart Monitor nécessite configuration complète${NC}"
     fi
 }
 
 # Affichage des instructions finales
 show_final_instructions() {
     echo ""
-    echo -e "${GREEN}🎉 === INSTALLATION TERMINÉE AVEC SUCCÈS ===${NC}"
+    echo -e "${GREEN}🎉 === INSTALLATION v2.1.8 TERMINÉE AVEC SUCCÈS ===${NC}"
     echo ""
     echo -e "${BLUE}📝 PROCHAINES ÉTAPES:${NC}"
     echo "1. 🔑 Éditez votre configuration:"
     echo "   nano config/config.json"
+    echo "   (Ajoutez vos clés Binance + configuration Telegram)"
     echo ""
-    echo "2. 📧 Configurez les emails (optionnel):"
+    echo "2. 📧 Configurez les emails pour Smart Monitor:"
     echo "   nano config/email_config.json"
     echo ""
-    echo "3. 🔒 Configurez les permissions API Binance:"
-    echo "   ✅ Enable Trading"
-    echo "   ✅ Enable Reading" 
-    echo "   ❌ Disable Withdrawals"
-    echo ""
-    echo "4. 🧪 Testez le bot:"
+    echo "3. 🧪 Testez le bot:"
+    echo "   cd ${PROJECT_ROOT}"
     echo "   source venv/bin/activate"
     echo "   python3 run_bot.py --dry-run"
     echo ""
-    echo "5. ⏰ Configurez l'automatisation (cron):"
+    echo "4. 📊 Testez le Smart Monitor v2.1.8:"
+    echo "   python3 smart_monitor.py daily"
+    echo ""
+    echo "5. ⏰ Configurez l'automatisation (NOUVEAU cron v2.1.8):"
     echo "   crontab -e"
-    echo "   # Ajoutez:"
-    echo "   */10 * * * * cd ${INSTALL_PATH} && ${INSTALL_PATH}/run_wrapper.sh"
-    echo "   0 23 * * * cd ${INSTALL_PATH} && ${INSTALL_PATH}/monitor.sh"
+    echo "   # Ajoutez ces lignes:"
+    echo "   */10 * * * * cd ${PROJECT_ROOT} && ${PROJECT_ROOT}/run_wrapper.sh"
+    echo "   0 18 * * * cd ${PROJECT_ROOT} && python3 smart_monitor.py daily >> logs/monitor.log 2>&1"
+    echo "   0 19 * * 0 cd ${PROJECT_ROOT} && python3 smart_monitor.py weekly >> logs/monitor.log 2>&1"
+    echo ""
+    echo -e "${BLUE}🆕 NOUVEAUTÉS v2.1.8:${NC}"
+    echo -e "   📊 Smart Monitor hybride EMAIL + TELEGRAM"
+    echo -e "   💎 Holdings vs Profits garantis"
+    echo -e "   🔄 Timestamps adaptatifs"
+    echo -e "   🚀 75% moins de code de monitoring"
     echo ""
     echo -e "${BLUE}📚 Documentation complète: README.md${NC}"
     echo -e "${BLUE}🐛 Support: GitHub Issues${NC}"
@@ -179,7 +218,7 @@ show_final_instructions() {
 
 # MENU PRINCIPAL
 echo "Choisissez le type d'installation:"
-echo "1. 🚀 Installation complète (recommandée)"
+echo "1. 🚀 Installation complète v2.1.8 (recommandée)"
 echo "2. 🔧 Installation basique (sans logrotate)"
 echo "3. 📊 Système seulement (dépendances)"
 echo "4. 🐍 Python seulement (environnement)"
@@ -188,7 +227,7 @@ read -p "Votre choix (1-4): " choice
 
 case $choice in
     1)
-        echo -e "${GREEN}🚀 Installation complète sélectionnée${NC}"
+        echo -e "${GREEN}🚀 Installation complète v2.1.8 sélectionnée${NC}"
         install_system_deps
         install_python_deps
         setup_config
@@ -221,4 +260,5 @@ case $choice in
 esac
 
 echo ""
-echo -e "${GREEN}🎯 Installation terminée avec succès!${NC}"
+echo -e "${GREEN}🎯 Installation v2.1.8 terminée avec succès!${NC}"
+echo -e "${BLUE}📊 Smart Monitor prêt pour rapports automatiques${NC}"

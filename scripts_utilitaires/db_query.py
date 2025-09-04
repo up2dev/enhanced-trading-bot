@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 import argparse
 
 class DatabaseExplorer:
-    def __init__(self, db_path="db/trading.db"):
+    def __init__(self, db_path="../db/trading.db"):
         self.db_path = db_path
         if not os.path.exists(db_path):
             print(f"❌ Base de données non trouvée: {db_path}")
